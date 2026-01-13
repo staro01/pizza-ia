@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(
-  _req: Request,
-  context: { params: { id: string } }
-) {
-  const id = context.params.id;
+type Ctx = { params: { id: string } };
+
+export async function GET(_req: Request, { params }: Ctx) {
+  const id = params.id;
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-  // cast "any" pour éviter les soucis de types si Prisma n'est pas à jour localement
   const db: any = prisma;
 
   const order = await db.order.findUnique({
@@ -20,11 +18,8 @@ export async function GET(
   return NextResponse.json({ order });
 }
 
-export async function DELETE(
-  _req: Request,
-  context: { params: { id: string } }
-) {
-  const id = context.params.id;
+export async function DELETE(_req: Request, { params }: Ctx) {
+  const id = params.id;
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
   const db: any = prisma;
