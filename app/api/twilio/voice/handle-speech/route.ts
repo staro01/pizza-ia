@@ -18,18 +18,29 @@ function getBaseUrl(req: NextRequest) {
   return `${proto}://${host}`;
 }
 
-function normalizeSpeech(s: string) {
+/* =========================
+   MENU SIMPLE (EN DUR)
+========================= */
+const MENU = [
+  { name: "margherita", label: "Margherita", price: 10 },
+  { name: "reine", label: "Reine", price: 11 },
+  { name: "pepperoni", label: "Pepperoni", price: 12 },
+];
+
+function normalize(s: string) {
   return (s ?? "").toLowerCase().trim();
 }
 
 function detectType(s: string): "delivery" | "takeaway" | null {
-  const t = normalizeSpeech(s);
-
-  if (t.includes("livraison") || t.includes("domicile") || t.includes("livrer")) return "delivery";
-  if (t.includes("emporter") || t.includes("à emporter") || t.includes("a emporter") || t.includes("à récupérer") || t.includes("recuperer"))
-    return "takeaway";
-
+  const t = normalize(s);
+  if (t.includes("livraison") || t.includes("domicile")) return "delivery";
+  if (t.includes("emporter") || t.includes("à emporter") || t.includes("a emporter")) return "takeaway";
   return null;
+}
+
+function detectPizza(s: string) {
+  const t = normalize(s);
+  return MENU.find((p) => t.includes(p.name)) ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -41,67 +52,100 @@ export async function POST(req: NextRequest) {
     const step = url.searchParams.get("step") ?? "type";
 
     const form = await req.formData();
-    const speechRaw = (form.get("SpeechResult") ?? "").toString();
+    const speech = (form.get("SpeechResult") ?? "").toString();
     const callSid = (form.get("CallSid") ?? "").toString();
 
-    // ✅ DEBUG vocal : on te dit ce que Twilio a réellement envoyé
-    const heard = speechRaw ? `J'ai entendu : ${speechRaw}.` : `Je n'ai rien reçu.`;
-
+    /* =========================
+       STEP 1 — TYPE (livraison / emporter)
+    ========================= */
     if (step === "type") {
-      const type = detectType(speechRaw);
+      const type = detectType(speech);
 
       if (!type) {
-        return xml(`<?xml version="1.0" encoding="UTF-8"?>
+        return xml(`
 <Response>
-  <Say language="fr-FR" voice="alice">${heard}</Say>
-  <Say language="fr-FR" voice="alice">Désolé, je n’ai pas compris. Dis “livraison” ou “à emporter”.</Say>
+  <Say voice="alice" language="fr-FR">
+    Désolé, je n’ai pas compris. Livraison ou à emporter ?
+  </Say>
   <Redirect method="POST">${redirectIncoming}</Redirect>
 </Response>`);
       }
 
-      // ✅ Crée/maj la commande liée à cet appel (CallSid = clientOrderId)
-      let order = null;
+      // création / mise à jour commande
+      const order = await prisma.order.upsert({
+        where: { clientOrderId: callSid },
+        update: { type, status: "confirmed" },
+        create: {
+          clientOrderId: callSid,
+          type,
+          status: "confirmed",
+          product: "",
+          size: "",
+          extras: "",
+          total: 0,
+        },
+      });
 
-      if (callSid) {
-        order = await prisma.order.findFirst({ where: { clientOrderId: callSid } });
-      }
-
-      if (!order) {
-        order = await prisma.order.create({
-          data: {
-            clientOrderId: callSid || null,
-            type,
-            status: "confirmed",
-            product: "",
-            size: "",
-            extras: "",
-            total: 0,
-          },
-        });
-      } else {
-        order = await prisma.order.update({
-          where: { id: order.id },
-          data: { type, status: "confirmed" },
-        });
-      }
-
-      return xml(`<?xml version="1.0" encoding="UTF-8"?>
+      return xml(`
 <Response>
-  <Say language="fr-FR" voice="alice">${heard}</Say>
-  <Say language="fr-FR" voice="alice">Parfait. Commande créée.</Say>
+  <Gather
+    input="speech"
+    language="fr-FR"
+    action="${baseUrl}/api/twilio/voice/handle-speech?step=product"
+    method="POST"
+  >
+    <Say voice="alice" language="fr-FR">
+      Parfait. Quelle pizza voulez-vous ?
+      Margherita à 10 euros, Reine à 11 euros,
+      ou Pepperoni à 12 euros ?
+    </Say>
+  </Gather>
+</Response>`);
+    }
+
+    /* =========================
+       STEP 2 — PRODUIT (pizza)
+    ========================= */
+    if (step === "product") {
+      const pizza = detectPizza(speech);
+
+      if (!pizza) {
+        return xml(`
+<Response>
+  <Say voice="alice" language="fr-FR">
+    Désolé, je n’ai pas reconnu cette pizza.
+  </Say>
+  <Redirect method="POST">${redirectIncoming}</Redirect>
+</Response>`);
+      }
+
+      await prisma.order.update({
+        where: { clientOrderId: callSid },
+        data: {
+          product: pizza.label,
+          total: pizza.price,
+        },
+      });
+
+      return xml(`
+<Response>
+  <Say voice="alice" language="fr-FR">
+    Très bien. Votre pizza ${pizza.label} est notée
+    pour ${pizza.price} euros.
+    Merci et à tout de suite.
+  </Say>
   <Hangup/>
 </Response>`);
     }
 
-    return xml(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Redirect method="POST">${redirectIncoming}</Redirect>
-</Response>`);
-  } catch (err: any) {
+    return xml(`<Response><Hangup/></Response>`);
+  } catch (err) {
     console.error("handle-speech error:", err);
-    return xml(`<?xml version="1.0" encoding="UTF-8"?>
+    return xml(`
 <Response>
-  <Say language="fr-FR" voice="alice">Erreur serveur. Merci de rappeler.</Say>
+  <Say voice="alice" language="fr-FR">
+    Une erreur est survenue. Merci de rappeler.
+  </Say>
   <Hangup/>
 </Response>`);
   }
