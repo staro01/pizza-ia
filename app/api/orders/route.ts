@@ -1,15 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// ✅ API simple : liste des commandes (pas de création ici)
+// Liste des commandes
 export async function GET() {
-  const db: any = prisma;
+  try {
+    const orders = await prisma.order.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
 
-  const orders = await db.order.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    include: { items: true },
-  });
-
-  return NextResponse.json({ orders });
+    return NextResponse.json({ orders }, { status: 200 });
+  } catch (err: any) {
+    console.error("GET /api/orders error:", err);
+    return NextResponse.json(
+      { error: "Failed to fetch orders" },
+      { status: 500 }
+    );
+  }
 }
