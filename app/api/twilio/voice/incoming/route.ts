@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 function xml(body: string) {
   return new NextResponse(body, {
     status: 200,
@@ -18,13 +20,19 @@ function getBaseUrl(req: Request) {
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
 
-  // ✅ on indique que c’est l’étape "type"
   const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech?step=type`;
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" language="fr-FR" speechTimeout="auto" action="${actionUrl}" method="POST">
+  <Gather
+    input="speech"
+    language="fr-FR"
+    speechTimeout="auto"
+    actionOnEmptyResult="true"
+    action="${actionUrl}"
+    method="POST"
+  >
     <Say language="fr-FR" voice="alice">Bonjour ! C’est la pizzeria. C’est pour une livraison ou à emporter ?</Say>
   </Gather>
 
