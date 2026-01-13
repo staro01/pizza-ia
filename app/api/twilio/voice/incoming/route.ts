@@ -19,8 +19,7 @@ function getBaseUrl(req: Request) {
 
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
-
-  const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech?step=type`;
+  const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech?step=listen`;
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -33,7 +32,9 @@ function buildTwiml(req: Request) {
     action="${actionUrl}"
     method="POST"
   >
-    <Say language="fr-FR" voice="alice">Bonjour ! C’est la pizzeria. C’est pour une livraison ou à emporter ?</Say>
+    <Say language="fr-FR" voice="alice">
+      Bonjour, ici la pizzeria. Je vous écoute pour votre commande.
+    </Say>
   </Gather>
 
   <Say language="fr-FR" voice="alice">Je n’ai pas entendu. On recommence.</Say>
