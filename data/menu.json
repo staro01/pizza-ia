@@ -1,0 +1,17 @@
+{
+  "sizes": ["M", "L"],
+  "pizzas": [
+    { "name": "Margherita", "base": "tomate", "price": { "M": 8, "L": 10 } },
+    { "name": "Reine", "base": "tomate", "price": { "M": 9, "L": 11 } },
+    { "name": "4 Fromages", "base": "crème", "price": { "M": 10, "L": 12 } }
+  ],
+  "extras": [
+    { "name": "Olives", "price": 1 },
+    { "name": "Champignons", "price": 1 },
+    { "name": "Jambon", "price": 1.5 }
+  ],
+  "drinks": [
+    { "name": "Coca-Cola", "price": 2 },
+    { "name": "Eau", "price": 1.5 }
+  ]
+}
