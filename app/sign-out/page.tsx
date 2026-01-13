@@ -9,9 +9,7 @@ export default function SignOutPage() {
   const router = useRouter();
 
   useEffect(() => {
-    signOut().then(() => {
-      router.push("/sign-in");
-    });
+    signOut().finally(() => router.push("/sign-in"));
   }, [signOut, router]);
 
   return null;
