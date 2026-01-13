@@ -1,53 +1,45 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { ConversationStatus } from "@prisma/client";
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
+  try {
+    const { searchParams } = new URL(req.url);
 
-  const q = (searchParams.get("q") ?? "").trim(); // recherche externalId
-  const status = (searchParams.get("status") ?? "").trim(); // active|completed|cancelled|all
-  const take = Math.min(Number(searchParams.get("take") ?? "50"), 200);
+    // petits filtres optionnels
+    const take = Math.min(Number(searchParams.get("take") ?? 50), 200);
+    const status = searchParams.get("status"); // "active" | "completed" | "cancelled" (optionnel)
+    const q = (searchParams.get("q") ?? "").trim(); // recherche dans externalId (optionnel)
 
-  const where: any = {};
+    const db: any = prisma;
 
-  if (q) {
-    where.OR = [
-      { externalId: { contains: q } },
-      // si tu ajoutes plus tard customerName/tel dans conversation, tu pourras chercher dessus ici
-    ];
-  }
-
-  if (status && status !== "all") {
-    // sécurité : n'accepte que les 3 valeurs enum
-    if (
-      status === ConversationStatus.active ||
-      status === ConversationStatus.completed ||
-      status === ConversationStatus.cancelled
-    ) {
+    const where: any = {};
+    if (status && ["active", "completed", "cancelled"].includes(status)) {
       where.status = status;
     }
-  }
+    if (q) {
+      where.OR = [
+        { externalId: { contains: q, mode: "insensitive" } },
+        // si tu veux plus tard : recherche dans messages etc.
+      ];
+    }
 
-  const conversations = await prisma.conversation.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take,
-    select: {
-      id: true,
-      externalId: true,
-      createdAt: true,
-      status: true,
-      failCount: true,
-      cancelledAt: true,
-      messages: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { content: true, createdAt: true, role: true },
+    const conversations = await db.conversation.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take,
+      include: {
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1, // dernier message pour l'aperçu
+        },
       },
-      _count: { select: { messages: true } },
-    },
-  });
+    });
 
-  return NextResponse.json({ conversations });
+    return NextResponse.json({ conversations });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message ?? "Server error" },
+      { status: 500 }
+    );
+  }
 }
