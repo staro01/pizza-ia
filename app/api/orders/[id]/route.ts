@@ -1,51 +1,34 @@
-import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-
-const allowed = ["confirmed", "preparing", "ready", "done", "cancelled"] as const;
-type AllowedStatus = (typeof allowed)[number];
+import { prisma } from "@/lib/prisma";
 
 export async function GET(
   _req: Request,
-  ctx: { params: Promise<{ id: string }> }
+  context: { params: { id: string } }
 ) {
-  const { id } = await ctx.params;
-  return NextResponse.json({ ok: true, route: "GET /api/orders/[id]", id });
+  const id = context.params.id;
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  // cast "any" pour éviter les soucis de types si Prisma n'est pas à jour localement
+  const db: any = prisma;
+
+  const order = await db.order.findUnique({
+    where: { id },
+    include: { items: true },
+  });
+
+  if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ order });
 }
 
-export async function PATCH(
-  req: Request,
-  ctx: { params: Promise<{ id: string }> }
+export async function DELETE(
+  _req: Request,
+  context: { params: { id: string } }
 ) {
-  const { id } = await ctx.params;
-  const key = decodeURIComponent(id);
+  const id = context.params.id;
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({}));
-  const statusKey = String(body?.status ?? "").trim().toLowerCase();
+  const db: any = prisma;
 
-  if (!key) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-  if (!allowed.includes(statusKey as AllowedStatus)) {
-    return NextResponse.json({ error: "Invalid status", allowed }, { status: 400 });
-  }
-
-  const status = statusKey as AllowedStatus;
-
-  // 1) update par id Prisma
-  try {
-    const order = await prisma.order.update({
-      where: { id: key },
-      data: { status: status as any },
-    });
-    return NextResponse.json({ ok: true, order });
-  } catch {}
-
-  // 2) update par clientOrderId
-  try {
-    const order = await prisma.order.update({
-      where: { clientOrderId: key },
-      data: { status: status as any },
-    });
-    return NextResponse.json({ ok: true, order });
-  } catch {}
-
-  return NextResponse.json({ error: "Not found", key }, { status: 404 });
+  await db.order.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
 }
