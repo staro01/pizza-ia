@@ -130,10 +130,11 @@ export async function POST(req: NextRequest) {
       return xml(`
 <Response>
   <Say voice="alice" language="fr-FR">
-    Très bien. Votre pizza ${pizza.label} est notée
-    pour ${pizza.price} euros.
-    Merci et à tout de suite.
-  </Say>
+  MODE MENU ACTIVÉ.
+  Parfait. Quelle pizza voulez-vous ?
+  Margherita à 10 euros, Reine à 11 euros,
+  ou Pepperoni à 12 euros ?
+</Say>
   <Hangup/>
 </Response>`);
     }
