@@ -11,22 +11,25 @@ model Conversation {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
   externalId String?  @unique
-
-  // optionnel mais utile pour le dashboard
   transcript String?
   messages   Json?
 }
 
 model Order {
   id            String   @id @default(cuid())
-  createdAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
 
-  // ce que ton UI affiche
-  clientOrderId  String?  @unique
-  type           String   @default("takeaway") // "delivery" ou "takeaway"
-  product        String   @default("")
-  size           String   @default("")
-  extras         String   @default("")
-  total          Float    @default(0)
-  status         String   @default("confirmed") // confirmed, preparing, ready, done, cancelled
+  clientOrderId String?  @unique
+
+  type          String   @default("takeaway") // delivery|takeaway
+  product       String   @default("")
+  size          String   @default("")
+  extras        String   @default("")
+
+  total         Float    @default(0)
+  status        String   @default("draft") // draft|confirmed|cancelled etc.
+
+  customerName  String?
+  address       String?
+  phone         String?
 }
