@@ -5,22 +5,27 @@ import { revalidatePath } from "next/cache";
 type ConversationStatusType = "active" | "completed" | "cancelled";
 
 async function getConversation(id: string) {
-  return prisma.conversation.findUnique({
+  // Cast "prisma.conversation" en any pour éviter les erreurs TS si Prisma Client n'est pas aligné
+  const db: any = prisma;
+
+  return db.conversation.findUnique({
     where: { id },
     include: { messages: { orderBy: { createdAt: "asc" } } },
-  });
+  }) as Promise<any | null>;
 }
 
 async function setStatusAction(formData: FormData) {
   "use server";
+  const db: any = prisma;
+
   const id = String(formData.get("id") ?? "");
   const status = String(formData.get("status") ?? "") as ConversationStatusType;
   if (!id) return;
 
-  await prisma.conversation.update({
+  await db.conversation.update({
     where: { id },
     data: {
-      status: status as any, // Prisma enum ou string selon ton schema
+      status,
       cancelledAt: status === "cancelled" ? new Date() : null,
     },
   });
@@ -31,10 +36,12 @@ async function setStatusAction(formData: FormData) {
 
 async function resetFailCountAction(formData: FormData) {
   "use server";
+  const db: any = prisma;
+
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
-  await prisma.conversation.update({
+  await db.conversation.update({
     where: { id },
     data: { failCount: 0 },
   });
@@ -44,6 +51,7 @@ async function resetFailCountAction(formData: FormData) {
 }
 
 export default async function Page({ params }: { params: { id: string } }) {
+  const db: any = prisma;
   const { id } = params;
 
   const conversation = await getConversation(id);
@@ -51,10 +59,7 @@ export default async function Page({ params }: { params: { id: string } }) {
   if (!conversation) {
     return (
       <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-        <Link
-          href="/admin/conversations"
-          style={{ color: "#555", textDecoration: "none" }}
-        >
+        <Link href="/admin/conversations" style={{ color: "#555", textDecoration: "none" }}>
           ← Retour
         </Link>
         <h1 style={{ marginTop: 12 }}>Conversation introuvable</h1>
@@ -63,20 +68,19 @@ export default async function Page({ params }: { params: { id: string } }) {
     );
   }
 
-  const events = await prisma.twilioEvent.findMany({
+  const events = (await db.twilioEvent.findMany({
     where: { conversationId: conversation.id },
     orderBy: { createdAt: "desc" },
     take: 50,
-  });
+  })) as any[];
+
+  const status: ConversationStatusType = (conversation.status ?? "active") as ConversationStatusType;
 
   return (
     <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <Link
-            href="/admin/conversations"
-            style={{ color: "#555", textDecoration: "none" }}
-          >
+          <Link href="/admin/conversations" style={{ color: "#555", textDecoration: "none" }}>
             ← Retour
           </Link>
 
@@ -86,8 +90,7 @@ export default async function Page({ params }: { params: { id: string } }) {
 
           <div style={{ color: "#666", marginTop: 6 }}>
             {new Date(conversation.createdAt).toLocaleString()} • status:{" "}
-            <b>{conversation.status as any}</b> • failCount:{" "}
-            <b>{conversation.failCount}</b>
+            <b>{status}</b> • failCount: <b>{conversation.failCount ?? 0}</b>
           </div>
         </div>
 
@@ -95,32 +98,24 @@ export default async function Page({ params }: { params: { id: string } }) {
           <form action={setStatusAction}>
             <input type="hidden" name="id" value={conversation.id} />
             <input type="hidden" name="status" value="active" />
-            <button style={btnStyle} type="submit">
-              Activer
-            </button>
+            <button style={btnStyle} type="submit">Activer</button>
           </form>
 
           <form action={setStatusAction}>
             <input type="hidden" name="id" value={conversation.id} />
             <input type="hidden" name="status" value="completed" />
-            <button style={btnStyle} type="submit">
-              Terminer
-            </button>
+            <button style={btnStyle} type="submit">Terminer</button>
           </form>
 
           <form action={setStatusAction}>
             <input type="hidden" name="id" value={conversation.id} />
             <input type="hidden" name="status" value="cancelled" />
-            <button style={btnStyle} type="submit">
-              Annuler
-            </button>
+            <button style={btnStyle} type="submit">Annuler</button>
           </form>
 
           <form action={resetFailCountAction}>
             <input type="hidden" name="id" value={conversation.id} />
-            <button style={btnStyleGhost} type="submit">
-              Reset fail
-            </button>
+            <button style={btnStyleGhost} type="submit">Reset fail</button>
           </form>
         </div>
       </div>
@@ -130,12 +125,10 @@ export default async function Page({ params }: { params: { id: string } }) {
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Logs Twilio</h2>
 
         {events.length === 0 ? (
-          <div style={{ color: "#666", marginTop: 8 }}>
-            Aucun log Twilio pour l’instant.
-          </div>
+          <div style={{ color: "#666", marginTop: 8 }}>Aucun log Twilio pour l’instant.</div>
         ) : (
           <div style={{ marginTop: 10 }}>
-            {events.map((e) => (
+            {events.map((e: any) => (
               <div
                 key={e.id}
                 style={{
@@ -149,8 +142,7 @@ export default async function Page({ params }: { params: { id: string } }) {
               >
                 <b>{e.eventType}</b> • {new Date(e.createdAt).toLocaleString()}
                 <div style={{ color: "#444", marginTop: 4 }}>
-                  status={e.callStatus ?? "-"} • from={e.from ?? "-"} • to=
-                  {e.to ?? "-"} • duration={e.duration ?? "-"}s
+                  status={e.callStatus ?? "-"} • from={e.from ?? "-"} • to={e.to ?? "-"} • duration={e.duration ?? "-"}s
                 </div>
               </div>
             ))}
@@ -163,7 +155,7 @@ export default async function Page({ params }: { params: { id: string } }) {
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Messages</h2>
 
         <div style={{ marginTop: 10 }}>
-          {conversation.messages.map((m) => (
+          {(conversation.messages ?? []).map((m: any) => (
             <div key={m.id} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
               <div style={{ width: 90, fontSize: 12, color: "#666" }}>
                 {new Date(m.createdAt).toLocaleTimeString()}
