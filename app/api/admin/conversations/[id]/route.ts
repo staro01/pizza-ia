@@ -4,9 +4,7 @@ import { prisma } from "@/lib/prisma";
 export async function GET(_req: Request, context: any) {
   try {
     const id = context?.params?.id as string;
-    if (!id) {
-      return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    }
+    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
     const db: any = prisma;
 
@@ -15,9 +13,7 @@ export async function GET(_req: Request, context: any) {
       include: { messages: { orderBy: { createdAt: "asc" } } },
     });
 
-    if (!conversation) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
+    if (!conversation) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     return NextResponse.json({ conversation });
   } catch (err: any) {
