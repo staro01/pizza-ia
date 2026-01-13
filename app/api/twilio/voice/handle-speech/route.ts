@@ -8,24 +8,23 @@ function xml(body: string) {
 }
 
 function getBaseUrl(req: Request) {
-  const host = req.headers.get("host");
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const host = forwardedHost ?? req.headers.get("host");
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
+
   if (!host) return "";
   return `${proto}://${host}`;
 }
 
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
-  const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech`;
+
+  // Ici c’est normal de renvoyer vers incoming pour boucler
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" language="fr-FR" speechTimeout="auto" action="${actionUrl}" method="POST">
-    <Say language="fr-FR" voice="alice">Bonjour ! C’est la pizzeria. C’est pour une livraison ou à emporter ?</Say>
-  </Gather>
-
-  <Say language="fr-FR" voice="alice">Je n’ai pas entendu. On recommence.</Say>
+  <Say language="fr-FR" voice="alice">Merci !</Say>
   <Redirect method="POST">${redirectUrl}</Redirect>
 </Response>`;
 }

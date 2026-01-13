@@ -8,14 +8,20 @@ function xml(body: string) {
 }
 
 function getBaseUrl(req: Request) {
-  const host = req.headers.get("host");
+  // Vercel / proxies mettent souvent x-forwarded-host
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  const host = forwardedHost ?? req.headers.get("host");
+
+  // x-forwarded-proto est le plus fiable derrière un proxy
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
+
   if (!host) return "";
   return `${proto}://${host}`;
 }
 
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
+
   const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech`;
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
 
