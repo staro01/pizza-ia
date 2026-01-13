@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-type Ctx = { params: { id: string } };
 
 function isValidKey(key: string) {
   const k = (key ?? "").trim();
@@ -9,20 +7,25 @@ function isValidKey(key: string) {
 }
 
 async function findOrderByIdOrClientOrderId(key: string) {
-  // 1) try id
+  // 1) Essaye par id
   const byId = await prisma.order.findUnique({ where: { id: key } });
   if (byId) return byId;
 
-  // 2) try clientOrderId
+  // 2) Essaye par clientOrderId
   const byClient = await prisma.order.findFirst({
     where: { clientOrderId: key },
   });
+
   return byClient;
 }
 
-export async function GET(_req: Request, { params }: Ctx) {
+// ⚠️ Next peut typer params comme Promise dans .next => on "await" pour être safe
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function GET(_req: NextRequest, context: RouteContext) {
   try {
-    const key = params.id;
+    const { id: key } = await context.params;
+
     if (!isValidKey(key)) {
       return NextResponse.json({ error: "Missing/invalid id" }, { status: 400 });
     }
@@ -37,9 +40,10 @@ export async function GET(_req: Request, { params }: Ctx) {
   }
 }
 
-export async function PATCH(req: Request, { params }: Ctx) {
+export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
-    const key = params.id;
+    const { id: key } = await context.params;
+
     if (!isValidKey(key)) {
       return NextResponse.json({ error: "Missing/invalid id" }, { status: 400 });
     }
@@ -66,9 +70,10 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, { params }: Ctx) {
+export async function DELETE(_req: NextRequest, context: RouteContext) {
   try {
-    const key = params.id;
+    const { id: key } = await context.params;
+
     if (!isValidKey(key)) {
       return NextResponse.json({ error: "Missing/invalid id" }, { status: 400 });
     }
