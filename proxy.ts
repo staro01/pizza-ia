@@ -11,12 +11,13 @@ const isPublicRoute = createRouteMatcher([
   "/api/twilio(.*)",
 ]);
 
-export default clerkMiddleware((auth, req: NextRequest) => {
+export default clerkMiddleware(async (auth, req: NextRequest) => {
   try {
-    // Public = passe
+    // Routes publiques
     if (isPublicRoute(req)) return NextResponse.next();
 
-    const { userId, sessionClaims } = auth();
+    // IMPORTANT: auth() est async
+    const { userId, sessionClaims } = await auth();
 
     // Pas connecté => sign-in
     if (!userId) {
@@ -25,21 +26,18 @@ export default clerkMiddleware((auth, req: NextRequest) => {
 
     const pathname = req.nextUrl.pathname;
 
-    // Rôle dans publicMetadata (Clerk)
-    const roleRaw =
-      (sessionClaims?.publicMetadata as any)?.role ??
-      (sessionClaims as any)?.metadata?.role;
-
+    // rôle depuis publicMetadata (Clerk)
+    const roleRaw = (sessionClaims?.publicMetadata as any)?.role;
     const role = typeof roleRaw === "string" ? roleRaw.toUpperCase() : null;
 
-    // Protection Admin
+    // Admin only
     if (pathname.startsWith("/admin")) {
       if (role !== "ADMIN") {
         return NextResponse.redirect(new URL("/restaurant", req.url));
       }
     }
 
-    // Protection Restaurant
+    // Restaurant only
     if (pathname.startsWith("/restaurant")) {
       if (role !== "RESTAURANT") {
         return NextResponse.redirect(new URL("/admin", req.url));
