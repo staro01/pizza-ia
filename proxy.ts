@@ -6,23 +6,24 @@ export default clerkMiddleware(async (auth, req) => {
   const { userId, sessionClaims, redirectToSignIn } = await auth();
 
   const pathname = req.nextUrl.pathname;
-  const isAdmin = pathname.startsWith("/admin");
-  const isRestaurant = pathname.startsWith("/restaurant");
 
-  // On protège seulement /admin et /restaurant
-  if ((isAdmin || isRestaurant) && !userId) {
+  const isAdminRoute = pathname.startsWith("/admin");
+  const isRestaurantRoute = pathname.startsWith("/restaurant");
+
+  // Protéger seulement /admin et /restaurant
+  if ((isAdminRoute || isRestaurantRoute) && !userId) {
     return redirectToSignIn({ returnBackUrl: req.url });
   }
 
   const role = (sessionClaims?.publicMetadata as any)?.role;
 
   // /admin -> ADMIN only
-  if (isAdmin && role !== "ADMIN") {
+  if (isAdminRoute && role !== "ADMIN") {
     return NextResponse.redirect(new URL("/restaurant", req.url));
   }
 
   // /restaurant -> RESTAURANT ou ADMIN
-  if (isRestaurant && role !== "RESTAURANT" && role !== "ADMIN") {
+  if (isRestaurantRoute && role !== "RESTAURANT" && role !== "ADMIN") {
     return NextResponse.redirect(new URL("/sign-in", req.url));
   }
 
@@ -31,9 +32,7 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and static files
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Toujours pour les API routes
     "/(api|trpc)(.*)",
   ],
 };
