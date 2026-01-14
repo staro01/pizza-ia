@@ -7,6 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Restaurant {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  name        String
+  phone       String?
+  clerkUserId String?  @unique
+
+  orders      Order[]
+}
+
 model Conversation {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
@@ -32,4 +44,9 @@ model Order {
   customerName  String?
   address       String?
   phone         String?
+
+  restaurantId  String?
+  restaurant    Restaurant? @relation(fields: [restaurantId], references: [id])
+
+  @@index([restaurantId])
 }
