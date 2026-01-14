@@ -43,6 +43,9 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
         return NextResponse.redirect(new URL("/admin", req.url));
       }
     }
+const res = NextResponse.next();
+res.headers.set("x-proxy-hit", "1");
+return res;
 
     return NextResponse.next();
   } catch (err) {
