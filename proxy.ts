@@ -52,6 +52,6 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   }
 });
 
-eexport const config = {
+export const config = {
   matcher: ["/admin/:path*", "/restaurant/:path*"],
 };
