@@ -18,25 +18,12 @@ export const metadata: Metadata = {
   description: "Plateforme IA de prise de commandes par téléphone",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-  const content = (
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+        <ClerkProvider>{children}</ClerkProvider>
       </body>
     </html>
   );
-
-  // Si la clé manque, on n'initialise pas Clerk pour éviter un crash au build/prerender
-  if (!publishableKey) {
-    return content;
-  }
-
-  return <ClerkProvider publishableKey={publishableKey}>{content}</ClerkProvider>;
 }
