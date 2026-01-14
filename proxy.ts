@@ -1,38 +1,59 @@
-// proxy.ts
-import { clerkMiddleware } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-export default clerkMiddleware(async (auth, req) => {
-  const { userId, sessionClaims, redirectToSignIn } = await auth();
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/client(.*)",
+  "/demo(.*)",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/sign-out(.*)",
+  "/api/twilio(.*)",
+]);
 
-  const pathname = req.nextUrl.pathname;
+export default clerkMiddleware((auth, req: NextRequest) => {
+  try {
+    // Public = passe
+    if (isPublicRoute(req)) return NextResponse.next();
 
-  const isAdminRoute = pathname.startsWith("/admin");
-  const isRestaurantRoute = pathname.startsWith("/restaurant");
+    const { userId, sessionClaims } = auth();
 
-  // Protéger seulement /admin et /restaurant
-  if ((isAdminRoute || isRestaurantRoute) && !userId) {
-    return redirectToSignIn({ returnBackUrl: req.url });
+    // Pas connecté => sign-in
+    if (!userId) {
+      return NextResponse.redirect(new URL("/sign-in", req.url));
+    }
+
+    const pathname = req.nextUrl.pathname;
+
+    // Rôle dans publicMetadata (Clerk)
+    const roleRaw =
+      (sessionClaims?.publicMetadata as any)?.role ??
+      (sessionClaims as any)?.metadata?.role;
+
+    const role = typeof roleRaw === "string" ? roleRaw.toUpperCase() : null;
+
+    // Protection Admin
+    if (pathname.startsWith("/admin")) {
+      if (role !== "ADMIN") {
+        return NextResponse.redirect(new URL("/restaurant", req.url));
+      }
+    }
+
+    // Protection Restaurant
+    if (pathname.startsWith("/restaurant")) {
+      if (role !== "RESTAURANT") {
+        return NextResponse.redirect(new URL("/admin", req.url));
+      }
+    }
+
+    return NextResponse.next();
+  } catch (err) {
+    // FAIL-OPEN : on ne casse pas tout le site
+    console.error("proxy.ts middleware error:", err);
+    return NextResponse.next();
   }
-
-  const role = (sessionClaims?.publicMetadata as any)?.role;
-
-  // /admin -> ADMIN only
-  if (isAdminRoute && role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/restaurant", req.url));
-  }
-
-  // /restaurant -> RESTAURANT ou ADMIN
-  if (isRestaurantRoute && role !== "RESTAURANT" && role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/sign-in", req.url));
-  }
-
-  return NextResponse.next();
 });
 
 export const config = {
-  matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
-  ],
+  matcher: ["/((?!.*\\..*|_next).*)", "/(api|trpc)(.*)"],
 };
