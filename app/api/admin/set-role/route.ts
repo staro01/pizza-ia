@@ -5,7 +5,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
 
   const form = await req.formData();
   const role = String(form.get("role") ?? "").toUpperCase();
@@ -14,9 +16,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
 
-  // ⚠️ Sécurité simple pour bootstrap :
-  // On autorise seulement si l'utilisateur n'a pas encore de rôle.
-  const user = await clerkClient.users.getUser(userId);
+  // ✅ Clerk client async
+  const client = await clerkClient();
+
+  // On autorise seulement si l'utilisateur n'a pas encore de rôle (bootstrap)
+  const user = await client.users.getUser(userId);
   const currentRole = (user.publicMetadata as any)?.role;
 
   if (currentRole) {
@@ -26,7 +30,7 @@ export async function POST(req: Request) {
     );
   }
 
-  await clerkClient.users.updateUser(userId, {
+  await client.users.updateUser(userId, {
     publicMetadata: {
       ...(user.publicMetadata as Record<string, unknown>),
       role,
