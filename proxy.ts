@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
+const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 const isPublicRoute = createRouteMatcher([
   "/",
   "/client(.*)",
@@ -11,50 +13,45 @@ const isPublicRoute = createRouteMatcher([
   "/api/twilio(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, req: NextRequest) => {
-  try {
-    // Routes publiques
-    if (isPublicRoute(req)) return NextResponse.next();
+// Si la clé manque, on n'initialise PAS Clerk middleware (sinon ça fait un 500 global)
+const fallbackMiddleware = (_req: NextRequest) => NextResponse.next();
 
-    // IMPORTANT: auth() est async
-    const { userId, sessionClaims } = await auth();
+const realMiddleware = clerkMiddleware(
+  async (auth, req: NextRequest) => {
+    try {
+      if (isPublicRoute(req)) return NextResponse.next();
 
-    // Pas connecté => sign-in
-    if (!userId) {
-      return NextResponse.redirect(new URL("/sign-in", req.url));
-    }
+      const { userId, sessionClaims } = await auth();
 
-    const pathname = req.nextUrl.pathname;
+      if (!userId) {
+        return NextResponse.redirect(new URL("/sign-in", req.url));
+      }
 
-    // rôle depuis publicMetadata (Clerk)
-    const roleRaw = (sessionClaims?.publicMetadata as any)?.role;
-    const role = typeof roleRaw === "string" ? roleRaw.toUpperCase() : null;
+      const pathname = req.nextUrl.pathname;
 
-    // Admin only
-    if (pathname.startsWith("/admin")) {
-      if (role !== "ADMIN") {
+      const roleRaw = (sessionClaims?.publicMetadata as any)?.role;
+      const role = typeof roleRaw === "string" ? roleRaw.toUpperCase() : null;
+
+      if (pathname.startsWith("/admin") && role !== "ADMIN") {
         return NextResponse.redirect(new URL("/restaurant", req.url));
       }
-    }
 
-    // Restaurant only
-    if (pathname.startsWith("/restaurant")) {
-      if (role !== "RESTAURANT") {
+      if (pathname.startsWith("/restaurant") && role !== "RESTAURANT") {
         return NextResponse.redirect(new URL("/admin", req.url));
       }
-    }
-const res = NextResponse.next();
-res.headers.set("x-proxy-hit", "1");
-return res;
 
-    return NextResponse.next();
-  } catch (err) {
-    // FAIL-OPEN : on ne casse pas tout le site
-    console.error("proxy.ts middleware error:", err);
-    return NextResponse.next();
-  }
-});
+      return NextResponse.next();
+    } catch (err) {
+      console.error("proxy.ts middleware error:", err);
+      return NextResponse.next();
+    }
+  },
+  // IMPORTANT: on passe explicitement la clé à Clerk
+  publishableKey ? { publishableKey } : undefined
+);
+
+export default publishableKey ? realMiddleware : fallbackMiddleware;
 
 export const config = {
-  matcher: ["/admin/:path*", "/restaurant/:path*"],
+  matcher: ["/((?!.*\\..*|_next).*)", "/(api|trpc)(.*)"],
 };
