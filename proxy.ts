@@ -24,10 +24,15 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
 
     const pathname = req.nextUrl.pathname;
 
-    const roleRaw = (sessionClaims?.publicMetadata as any)?.role;
+    // ✅ lecture "robuste" du role
+    const roleRaw =
+      (sessionClaims?.publicMetadata as any)?.role ??
+      (sessionClaims as any)?.metadata?.role ??
+      (sessionClaims as any)?.publicMetadata?.role;
+
     const role = typeof roleRaw === "string" ? roleRaw.toUpperCase() : null;
 
-    // ✅ Si pas de rôle -> pas de boucle : on renvoie vers /
+    // Si pas de rôle => retour home (bootstrap)
     if (!role) {
       return NextResponse.redirect(new URL("/", req.url));
     }
