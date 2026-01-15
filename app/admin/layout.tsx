@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default async function RestaurantLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -12,7 +12,7 @@ export default async function RestaurantLayout({
   if (!user) redirect("/sign-in");
 
   const role = (user.publicMetadata as any)?.role;
-  if (role !== "RESTAURANT") redirect("/");
+  if (role !== "ADMIN") redirect("/");
 
   return <>{children}</>;
 }
