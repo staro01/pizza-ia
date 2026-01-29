@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { auth } from "@clerk/nextjs/server";
+import { currentUser } from "@clerk/nextjs/server";
+import { prisma } from "../../lib/prisma";
 
 export async function GET() {
   try {
-    const { userId, sessionClaims } = await auth();
+    const user = await currentUser();
 
-    if (!userId) {
+    if (!user) {
       return NextResponse.json({ orders: [] }, { status: 200 });
     }
 
-    const role = (sessionClaims?.publicMetadata as any)?.role;
+    const role = String((user.publicMetadata as any)?.role ?? "").toUpperCase();
 
     // ADMIN : voit tout
     if (role === "ADMIN") {
@@ -23,12 +23,11 @@ export async function GET() {
 
     // RESTAURANT : on trouve son resto via clerkUserId
     const restaurant = await prisma.restaurant.findUnique({
-      where: { clerkUserId: userId },
+      where: { clerkUserId: user.id },
       select: { id: true },
     });
 
     if (!restaurant) {
-      // pas encore relié : on renvoie vide (pas d'erreur)
       return NextResponse.json({ orders: [] }, { status: 200 });
     }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { auth } from "@clerk/nextjs/server";
+import { currentUser } from "@clerk/nextjs/server";
+import { prisma } from "../../../lib/prisma";
 
 function isValidKey(key: string) {
   const k = (key ?? "").trim();
@@ -8,25 +8,27 @@ function isValidKey(key: string) {
 }
 
 async function findOrderByIdOrClientOrderId(key: string) {
-  // 1) Essaye par id
   const byId = await prisma.order.findUnique({ where: { id: key } });
   if (byId) return byId;
 
-  // 2) Essaye par clientOrderId
   return prisma.order.findFirst({ where: { clientOrderId: key } });
 }
 
 async function getAuthContext() {
-  const { userId, sessionClaims } = await auth();
-  const role = (sessionClaims?.publicMetadata as any)?.role as string | undefined;
-  return { userId, role };
+  const user = await currentUser();
+  if (!user) return { userId: null as string | null, role: undefined as string | undefined };
+
+  const role = String((user.publicMetadata as any)?.role ?? "").toUpperCase();
+  return { userId: user.id, role };
 }
 
-async function assertCanAccessOrder(order: { restaurantId: string | null }, userId: string, role?: string) {
-  // ADMIN -> OK
+async function assertCanAccessOrder(
+  order: { restaurantId: string | null },
+  userId: string,
+  role?: string
+) {
   if (role === "ADMIN") return { ok: true as const };
 
-  // RESTAURANT -> doit être lié à un restaurant
   const restaurant = await prisma.restaurant.findUnique({
     where: { clerkUserId: userId },
     select: { id: true },
@@ -34,7 +36,6 @@ async function assertCanAccessOrder(order: { restaurantId: string | null }, user
 
   if (!restaurant) return { ok: false as const, status: 403, error: "Restaurant not linked" };
 
-  // commande doit appartenir à ce restaurant
   if (!order.restaurantId || order.restaurantId !== restaurant.id) {
     return { ok: false as const, status: 403, error: "Forbidden" };
   }
@@ -42,7 +43,6 @@ async function assertCanAccessOrder(order: { restaurantId: string | null }, user
   return { ok: true as const };
 }
 
-// ⚠️ Next peut typer params comme Promise dans .next => on "await" pour être safe
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(_req: NextRequest, context: RouteContext) {
