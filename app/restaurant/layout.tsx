@@ -14,10 +14,10 @@ export default async function RestaurantLayout({
 
   const role = String((user.publicMetadata as any)?.role ?? "").toUpperCase();
 
-  // ✅ ADMIN et RESTAURANT autorisés
+  // ✅ ADMIN et RESTAURANT peuvent accéder à /restaurant
   if (role !== "RESTAURANT" && role !== "ADMIN") redirect("/");
 
-  // ✅ Bootstrap uniquement pour RESTAURANT
+  // ✅ bootstrap seulement pour RESTAURANT
   if (role === "RESTAURANT") {
     await ensureRestaurantForCurrentUser();
   }
