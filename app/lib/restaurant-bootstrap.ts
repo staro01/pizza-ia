@@ -1,5 +1,6 @@
+// app/lib/restaurant-bootstrap.ts
 import { currentUser } from "@clerk/nextjs/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "./prisma";
 
 function getRole(user: any): string | null {
   const role = user?.publicMetadata?.role;
