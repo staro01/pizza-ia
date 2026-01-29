@@ -17,10 +17,16 @@ function getBaseUrl(req: Request) {
   return `${proto}://${host}`;
 }
 
+function ttsUrl(baseUrl: string, text: string) {
+  return `${baseUrl}/api/tts?text=${encodeURIComponent(text)}`;
+}
+
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
   const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech?step=listen`;
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
+
+  const greet = "Bonjour, ici la pizzeria. Je vous écoute pour votre commande.";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -32,12 +38,10 @@ function buildTwiml(req: Request) {
     action="${actionUrl}"
     method="POST"
   >
-    <Say language="fr-FR" voice="alice">
-      Bonjour, ici la pizzeria. Je vous écoute pour votre commande.
-    </Say>
+    <Play>${ttsUrl(baseUrl, greet)}</Play>
   </Gather>
 
-  <Say language="fr-FR" voice="alice">Je n’ai pas entendu. On recommence.</Say>
+  <Play>${ttsUrl(baseUrl, "Je n’ai pas entendu. On recommence.")}</Play>
   <Redirect method="POST">${redirectUrl}</Redirect>
 </Response>`;
 }

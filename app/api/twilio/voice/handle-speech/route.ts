@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "../../../../lib/prisma";
 
 export const runtime = "nodejs";
 
@@ -18,6 +18,10 @@ function getBaseUrl(req: NextRequest) {
   return `${proto}://${host}`;
 }
 
+function ttsUrl(baseUrl: string, text: string) {
+  return `${baseUrl}/api/tts?text=${encodeURIComponent(text)}`;
+}
+
 const MENU = [
   { key: "margherita", label: "Margherita", price: 10 },
   { key: "reine", label: "Reine", price: 11 },
@@ -31,7 +35,7 @@ function norm(s: string) {
 function wantsMenu(s: string) {
   const t = norm(s);
   return (
-    t.includes("qu") && (t.includes("pizza") || t.includes("propose") || t.includes("menu")) ||
+    (t.includes("qu") && (t.includes("pizza") || t.includes("propose") || t.includes("menu"))) ||
     t.includes("c'est quoi") ||
     t.includes("qu'est ce") ||
     t.includes("quelles pizzas") ||
@@ -55,7 +59,8 @@ function detectType(s: string): "delivery" | "takeaway" | null {
     t.includes("sur place") ||
     t.includes("récupérer") ||
     t.includes("recuperer")
-  ) return "takeaway";
+  )
+    return "takeaway";
   return null;
 }
 
@@ -69,16 +74,16 @@ function isNo(s: string) {
 }
 
 function menuSentence() {
-  // Phrase courte et claire
   return `Nous avons : ${MENU.map((p) => `${p.label} à ${p.price} euros`).join(", ")}. Quelle pizza souhaitez-vous ?`;
 }
 
-function gatherSay(baseUrl: string, step: string, text: string) {
+function gatherPlay(baseUrl: string, step: string, text: string) {
+  const action = `${baseUrl}/api/twilio/voice/handle-speech?step=${step}`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech" language="fr-FR" speechTimeout="auto"
-    action="${baseUrl}/api/twilio/voice/handle-speech?step=${step}" method="POST">
-    <Say language="fr-FR" voice="alice">${text}</Say>
+    action="${action}" method="POST">
+    <Play>${ttsUrl(baseUrl, text)}</Play>
   </Gather>
 </Response>`;
 }
@@ -95,11 +100,8 @@ export async function POST(req: NextRequest) {
     const speech = (form.get("SpeechResult") ?? "").toString();
     const callSid = (form.get("CallSid") ?? "").toString();
 
-    // On travaille toujours avec la commande liée à l'appel
-    // NOTE: upsert par CallSid => simple et stable
     async function getOrCreateOrder() {
       if (!callSid) {
-        // fallback très rare, mais on évite de planter
         return prisma.order.create({
           data: { status: "draft", type: "takeaway", total: 0, product: "" },
         });
@@ -120,69 +122,42 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // STEP: listen (pizza ou demande menu)
+    // STEP: listen
     if (step === "listen") {
       const order = await getOrCreateOrder();
 
       if (wantsMenu(speech) || !speech.trim()) {
-        return xml(gatherSay(baseUrl, "listen", menuSentence()));
+        return xml(gatherPlay(baseUrl, "listen", menuSentence()));
       }
 
       const pizza = detectPizza(speech);
       if (!pizza) {
-        return xml(
-          gatherSay(
-            baseUrl,
-            "listen",
-            `Désolé, je n’ai pas reconnu la pizza. ${menuSentence()}`
-          )
-        );
+        return xml(gatherPlay(baseUrl, "listen", `Désolé, je n’ai pas reconnu la pizza. ${menuSentence()}`));
       }
 
       await prisma.order.update({
         where: { id: order.id },
-        data: {
-          product: pizza.label,
-          total: pizza.price,
-          status: "draft",
-        },
+        data: { product: pizza.label, total: pizza.price, status: "draft" },
       });
 
-      return xml(
-        gatherSay(
-          baseUrl,
-          "type",
-          `D’accord pour une ${pizza.label}. Ce sera en livraison ou à venir chercher sur place ?`
-        )
-      );
+      return xml(gatherPlay(baseUrl, "type", `Ok, une ${pizza.label}. Ce sera en livraison, ou à venir chercher ?`));
     }
 
-    // STEP: type (delivery / takeaway)
+    // STEP: type
     if (step === "type") {
       const order = await getOrCreateOrder();
       const type = detectType(speech);
 
       if (!type) {
-        return xml(
-          gatherSay(
-            baseUrl,
-            "type",
-            `Désolé, je n’ai pas compris. Livraison ou à venir chercher ?`
-          )
-        );
+        return xml(gatherPlay(baseUrl, "type", `Je n’ai pas compris. Livraison, ou à venir chercher ?`));
       }
 
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { type },
-      });
+      await prisma.order.update({ where: { id: order.id }, data: { type } });
 
       if (type === "delivery") {
-        return xml(gatherSay(baseUrl, "name", `Très bien. Quel est votre nom, s’il vous plaît ?`));
+        return xml(gatherPlay(baseUrl, "name", `Très bien. Votre nom, s’il vous plaît ?`));
       }
-
-      // takeaway
-      return xml(gatherSay(baseUrl, "name_takeaway", `D’accord. Quel nom pour la commande ?`));
+      return xml(gatherPlay(baseUrl, "name_takeaway", `D’accord. Quel nom pour la commande ?`));
     }
 
     // STEP: name (delivery)
@@ -190,16 +165,11 @@ export async function POST(req: NextRequest) {
       const order = await getOrCreateOrder();
       const name = speech.trim();
 
-      if (!name) {
-        return xml(gatherSay(baseUrl, "name", `Je n’ai pas entendu. Quel est votre nom ?`));
-      }
+      if (!name) return xml(gatherPlay(baseUrl, "name", `Je n’ai pas entendu. Votre nom, s’il vous plaît ?`));
 
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { customerName: name },
-      });
+      await prisma.order.update({ where: { id: order.id }, data: { customerName: name } });
 
-      return xml(gatherSay(baseUrl, "address", `Merci ${name}. Quelle est votre adresse complète ?`));
+      return xml(gatherPlay(baseUrl, "address", `Merci ${name}. Votre adresse complète ?`));
     }
 
     // STEP: address (delivery)
@@ -207,16 +177,11 @@ export async function POST(req: NextRequest) {
       const order = await getOrCreateOrder();
       const address = speech.trim();
 
-      if (!address) {
-        return xml(gatherSay(baseUrl, "address", `Je n’ai pas entendu. Quelle est votre adresse complète ?`));
-      }
+      if (!address) return xml(gatherPlay(baseUrl, "address", `Je n’ai pas entendu. Votre adresse complète ?`));
 
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { address },
-      });
+      await prisma.order.update({ where: { id: order.id }, data: { address } });
 
-      return xml(gatherSay(baseUrl, "phone", `Merci. Quel est votre numéro de téléphone ?`));
+      return xml(gatherPlay(baseUrl, "phone", `Merci. Votre numéro de téléphone ?`));
     }
 
     // STEP: phone (delivery)
@@ -224,18 +189,15 @@ export async function POST(req: NextRequest) {
       const order = await getOrCreateOrder();
       const phone = speech.trim();
 
-      if (!phone) {
-        return xml(gatherSay(baseUrl, "phone", `Je n’ai pas entendu. Quel est votre numéro de téléphone ?`));
-      }
+      if (!phone) return xml(gatherPlay(baseUrl, "phone", `Je n’ai pas entendu. Votre numéro de téléphone ?`));
 
       const updated = await prisma.order.update({
         where: { id: order.id },
         data: { phone },
       });
 
-      // récap + confirm
-      const recap = `Récapitulatif : une ${updated.product}. Livraison. Nom : ${updated.customerName}. Adresse : ${updated.address}. Total : ${updated.total} euros. C’est ok ?`;
-      return xml(gatherSay(baseUrl, "confirm", recap));
+      const recap = `Récap : une ${updated.product}. En livraison. Nom : ${updated.customerName}. Adresse : ${updated.address}. Total : ${updated.total} euros. C’est bon pour vous ?`;
+      return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
     // STEP: name_takeaway
@@ -243,17 +205,15 @@ export async function POST(req: NextRequest) {
       const order = await getOrCreateOrder();
       const name = speech.trim();
 
-      if (!name) {
-        return xml(gatherSay(baseUrl, "name_takeaway", `Je n’ai pas entendu. Quel nom pour la commande ?`));
-      }
+      if (!name) return xml(gatherPlay(baseUrl, "name_takeaway", `Je n’ai pas entendu. Quel nom pour la commande ?`));
 
       const updated = await prisma.order.update({
         where: { id: order.id },
         data: { customerName: name },
       });
 
-      const recap = `Récapitulatif : une ${updated.product}. À venir chercher. Nom : ${updated.customerName}. Total : ${updated.total} euros. C’est ok ?`;
-      return xml(gatherSay(baseUrl, "confirm", recap));
+      const recap = `Récap : une ${updated.product}. À venir chercher. Nom : ${updated.customerName}. Total : ${updated.total} euros. C’est bon pour vous ?`;
+      return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
     // STEP: confirm
@@ -261,26 +221,21 @@ export async function POST(req: NextRequest) {
       const order = await getOrCreateOrder();
 
       if (isYes(speech)) {
-        await prisma.order.update({
-          where: { id: order.id },
-          data: { status: "confirmed" },
-        });
+        await prisma.order.update({ where: { id: order.id }, data: { status: "confirmed" } });
 
         return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="fr-FR" voice="alice">Parfait. Merci, au revoir.</Say>
+  <Play>${ttsUrl(baseUrl, "Parfait. Merci beaucoup. À bientôt, au revoir.")}</Play>
   <Pause length="1"/>
   <Hangup/>
 </Response>`);
       }
 
       if (isNo(speech)) {
-        // on recommence
         await prisma.order.update({
           where: { id: order.id },
           data: {
             status: "draft",
-            // on peut garder ou reset; là je reset pour éviter confusion
             product: "",
             total: 0,
             type: "takeaway",
@@ -292,13 +247,12 @@ export async function POST(req: NextRequest) {
 
         return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="fr-FR" voice="alice">D’accord, on recommence.</Say>
+  <Play>${ttsUrl(baseUrl, "D’accord, on recommence.")}</Play>
   <Redirect method="POST">${redirectIncoming}</Redirect>
 </Response>`);
       }
 
-      // si réponse floue
-      return xml(gatherSay(baseUrl, "confirm", `Je n’ai pas compris. C’est ok ? Répondez oui ou non.`));
+      return xml(gatherPlay(baseUrl, "confirm", `Je n’ai pas compris. Dites oui ou non : c’est bon ?`));
     }
 
     // fallback
@@ -310,7 +264,7 @@ export async function POST(req: NextRequest) {
     console.error("handle-speech error:", err);
     return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say language="fr-FR" voice="alice">Une erreur est survenue. Merci de rappeler.</Say>
+  <Play>${ttsUrl(baseUrl, "Une erreur est survenue. Merci de rappeler.")}</Play>
   <Hangup/>
 </Response>`);
   }
