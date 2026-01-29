@@ -1,4 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { ensureRestaurantForCurrentUser } from "../lib/restaurant-bootstrap";
 
 export const dynamic = "force-dynamic";
 
@@ -8,29 +10,17 @@ export default async function RestaurantLayout({
   children: React.ReactNode;
 }) {
   const user = await currentUser();
+  if (!user) redirect("/sign-in");
 
-  if (!user) {
-    return (
-      <pre style={{ padding: 16 }}>
-        NO USER (currentUser() = null)
-      </pre>
-    );
+  const role = String((user.publicMetadata as any)?.role ?? "").toUpperCase();
+
+  // ✅ ADMIN et RESTAURANT autorisés
+  if (role !== "RESTAURANT" && role !== "ADMIN") redirect("/");
+
+  // ✅ Bootstrap uniquement pour RESTAURANT
+  if (role === "RESTAURANT") {
+    await ensureRestaurantForCurrentUser();
   }
 
-  const rawRole = (user.publicMetadata as any)?.role;
-  const role = String(rawRole ?? "").toUpperCase();
-
-  return (
-    <div style={{ padding: 16 }}>
-      <pre>
-        userId: {user.id}
-        {"\n"}rawRole: {String(rawRole)}
-        {"\n"}roleNormalized: {role}
-      </pre>
-
-      <hr style={{ margin: "16px 0" }} />
-
-      {children}
-    </div>
-  );
+  return <>{children}</>;
 }
