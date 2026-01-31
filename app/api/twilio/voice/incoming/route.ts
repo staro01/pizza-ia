@@ -18,11 +18,12 @@ function getBaseUrl(req: Request) {
 }
 
 function ttsUrl(baseUrl: string, text: string) {
-  return `${baseUrl}/api/tts/audio.wav?text=${encodeURIComponent(text)}`;
+  return `${baseUrl}/api/tts/audio.ulaw?text=${encodeURIComponent(text)}`;
 }
 
 function buildTwiml(req: Request) {
   const baseUrl = getBaseUrl(req);
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${ttsUrl(baseUrl, "bonjour")}</Play>
@@ -30,10 +31,10 @@ function buildTwiml(req: Request) {
 </Response>`;
 }
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   return xml(buildTwiml(req));
 }
 
-export async function GET(req: Request) {
+export async function POST(req: Request) {
   return xml(buildTwiml(req));
 }
