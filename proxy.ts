@@ -8,21 +8,30 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/sign-out(.*)",
+
+  // ✅ Twilio + TTS doivent être publics (Twilio n'a pas de cookies)
   "/api/twilio(.*)",
+  "/api/tts(.*)",
+
+  // Debug si tu en as besoin
   "/api/debug(.*)",
+
+  // SSE (si tu veux que restaurant dashboard fonctionne sans auth, sinon enlève)
+  "/api/orders/stream(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
   try {
+    // ✅ Public -> on laisse passer sans Clerk
     if (isPublicRoute(req)) return NextResponse.next();
 
+    // ✅ Le reste tu peux garder comme avant
     const { userId } = await auth();
 
     if (!userId) {
       return NextResponse.redirect(new URL("/sign-in", req.url));
     }
 
-    // ✅ On ne fait PLUS de contrôle de rôle ici
     return NextResponse.next();
   } catch (err) {
     console.error("proxy.ts middleware error:", err);
