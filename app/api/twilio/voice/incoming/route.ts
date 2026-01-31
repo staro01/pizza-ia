@@ -1,11 +1,13 @@
-import { NextResponse } from "next/server";
-
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function xml(body: string) {
-  return new NextResponse(body, {
+  return new Response(body, {
     status: 200,
-    headers: { "Content-Type": "text/xml" },
+    headers: {
+      "Content-Type": "application/xml; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
   });
 }
 
@@ -16,6 +18,7 @@ function getBaseUrl(req: Request) {
 }
 
 function ttsUrl(baseUrl: string, text: string) {
+  // ⚠️ garde bien audio.mp3 si tu l’as créé
   return `${baseUrl}/api/tts/audio.mp3?text=${encodeURIComponent(text)}`;
 }
 
