@@ -18,8 +18,7 @@ function getBaseUrl(req: Request) {
 }
 
 function ttsUrl(baseUrl: string, text: string) {
-  // ⚠️ garde bien audio.mp3 si tu l’as créé
-  return `${baseUrl}/api/tts/audio.mp3?text=${encodeURIComponent(text)}`;
+  return `${baseUrl}/api/tts/audio.wav?text=${encodeURIComponent(text)}`;
 }
 
 function buildTwiml(req: Request) {
