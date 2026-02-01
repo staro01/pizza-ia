@@ -21,22 +21,33 @@ function getBaseUrl(req: NextRequest) {
 }
 
 function ttsUrl(baseUrl: string, text: string) {
+  // ✅ TTS qui fonctionne (ULAW)
   return `${baseUrl}/api/tts/audio.ulaw?text=${encodeURIComponent(text)}`;
 }
 
-function gatherPlay(baseUrl: string, step: string, text: string) {
-  const action = `${baseUrl}/api/twilio/voice/handle-speech?step=${step}`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Gather input="speech" language="fr-FR" speechTimeout="auto"
-    action="${action}" method="POST" actionOnEmptyResult="true">
-    <Play>${ttsUrl(baseUrl, text)}</Play>
-  </Gather>
+/* =========================
+   Helpers restaurant / tel
+========================= */
 
-  <Play>${ttsUrl(baseUrl, "Je n’ai pas entendu. Répétez s’il vous plaît.")}</Play>
-  <Redirect method="POST">${action}</Redirect>
-</Response>`;
+function normPhone(p?: string | null) {
+  return (p ?? "").trim().replace(/\s+/g, "");
 }
+
+async function findRestaurantIdByTo(to?: string | null) {
+  const twilioNumber = normPhone(to);
+  if (!twilioNumber) return null;
+
+  const r = await prisma.restaurant.findFirst({
+    where: { twilioNumber },
+    select: { id: true },
+  });
+
+  return r?.id ?? null;
+}
+
+/* =========================
+   Menu / NLP simple
+========================= */
 
 const MENU = [
   { key: "margherita", label: "Margherita", price: 10 },
@@ -68,7 +79,13 @@ function detectPizza(s: string) {
 function detectType(s: string): "delivery" | "takeaway" | null {
   const t = norm(s);
   if (t.includes("livraison") || t.includes("domicile") || t.includes("livrer")) return "delivery";
-  if (t.includes("emporter") || t.includes("a emporter") || t.includes("à emporter") || t.includes("venir chercher")) return "takeaway";
+  if (
+    t.includes("emporter") ||
+    t.includes("a emporter") ||
+    t.includes("à emporter") ||
+    t.includes("venir chercher")
+  )
+    return "takeaway";
   return null;
 }
 
@@ -76,6 +93,7 @@ function isYes(s: string) {
   const t = norm(s);
   return t === "oui" || t.includes("oui") || t.includes("ok") || t.includes("d'accord") || t.includes("parfait");
 }
+
 function isNo(s: string) {
   const t = norm(s);
   return t === "non" || t.includes("non");
@@ -84,6 +102,30 @@ function isNo(s: string) {
 function menuSentence() {
   return `Nous avons : ${MENU.map((p) => `${p.label} à ${p.price} euros`).join(", ")}. Quelle pizza souhaitez-vous ?`;
 }
+
+function gatherPlay(baseUrl: string, step: string, text: string) {
+  const action = `${baseUrl}/api/twilio/voice/handle-speech?step=${step}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather
+    input="speech"
+    language="fr-FR"
+    speechTimeout="auto"
+    actionOnEmptyResult="true"
+    action="${action}"
+    method="POST"
+  >
+    <Play>${ttsUrl(baseUrl, text)}</Play>
+  </Gather>
+
+  <Play>${ttsUrl(baseUrl, "Je n’ai pas entendu. Répétez s’il vous plaît.")}</Play>
+  <Redirect method="POST">${action}</Redirect>
+</Response>`;
+}
+
+/* =========================
+   Handler principal
+========================= */
 
 export async function POST(req: NextRequest) {
   const baseUrl = getBaseUrl(req);
@@ -96,15 +138,26 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     const speech = (form.get("SpeechResult") ?? "").toString();
     const callSid = (form.get("CallSid") ?? "").toString();
+    const to = (form.get("To") ?? "").toString();
+
+    const restaurantId = await findRestaurantIdByTo(to);
 
     async function getOrCreateOrder() {
       if (!callSid) {
         return prisma.order.create({
-          data: { status: "draft", type: "takeaway", total: 0, product: "", size: "", extras: "" },
+          data: {
+            status: "draft",
+            type: "takeaway",
+            total: 0,
+            product: "",
+            size: "",
+            extras: "",
+            restaurantId,
+          },
         });
       }
 
-      return prisma.order.upsert({
+      const order = await prisma.order.upsert({
         where: { clientOrderId: callSid },
         update: {},
         create: {
@@ -115,11 +168,23 @@ export async function POST(req: NextRequest) {
           size: "",
           extras: "",
           total: 0,
+          restaurantId,
         },
       });
+
+      if (!order.restaurantId && restaurantId) {
+        return prisma.order.update({
+          where: { id: order.id },
+          data: { restaurantId },
+        });
+      }
+
+      return order;
     }
 
-    // STEP: listen (choix pizza)
+    /* ====== STEPS ====== */
+
+    // listen
     if (step === "listen") {
       const order = await getOrCreateOrder();
 
@@ -134,74 +199,75 @@ export async function POST(req: NextRequest) {
 
       await prisma.order.update({
         where: { id: order.id },
-        data: { product: pizza.label, total: pizza.price, status: "draft" },
+        data: { product: pizza.label, total: pizza.price },
       });
 
-      return xml(gatherPlay(baseUrl, "type", `Ok, une ${pizza.label}. Ce sera en livraison ou à emporter ?`));
+      return xml(gatherPlay(baseUrl, "type", `Ok, une ${pizza.label}. Livraison ou à emporter ?`));
     }
 
-    // STEP: type
+    // type
     if (step === "type") {
       const order = await getOrCreateOrder();
       const type = detectType(speech);
 
       if (!type) {
-        return xml(gatherPlay(baseUrl, "type", `Je n’ai pas compris. Livraison ou à emporter ?`));
+        return xml(gatherPlay(baseUrl, "type", "Livraison ou à emporter ?"));
       }
 
       await prisma.order.update({ where: { id: order.id }, data: { type } });
 
-      if (type === "delivery") {
-        return xml(gatherPlay(baseUrl, "name", `Très bien. Votre nom s’il vous plaît ?`));
-      }
-      return xml(gatherPlay(baseUrl, "name_takeaway", `D’accord. Quel nom pour la commande ?`));
+      return type === "delivery"
+        ? xml(gatherPlay(baseUrl, "name", "Votre nom s’il vous plaît ?"))
+        : xml(gatherPlay(baseUrl, "name_takeaway", "Quel nom pour la commande ?"));
     }
 
-    // STEP: name (delivery)
+    // name (delivery)
     if (step === "name") {
       const order = await getOrCreateOrder();
-      const name = speech.trim();
-      if (!name) return xml(gatherPlay(baseUrl, "name", `Je n’ai pas entendu. Votre nom s’il vous plaît ?`));
+      if (!speech.trim()) return xml(gatherPlay(baseUrl, "name", "Votre nom s’il vous plaît ?"));
 
-      await prisma.order.update({ where: { id: order.id }, data: { customerName: name } });
-      return xml(gatherPlay(baseUrl, "address", `Merci ${name}. Votre adresse complète ?`));
+      await prisma.order.update({ where: { id: order.id }, data: { customerName: speech.trim() } });
+      return xml(gatherPlay(baseUrl, "address", "Votre adresse complète ?"));
     }
 
-    // STEP: address (delivery)
+    // address
     if (step === "address") {
       const order = await getOrCreateOrder();
-      const address = speech.trim();
-      if (!address) return xml(gatherPlay(baseUrl, "address", `Je n’ai pas entendu. Votre adresse complète ?`));
+      if (!speech.trim()) return xml(gatherPlay(baseUrl, "address", "Votre adresse complète ?"));
 
-      await prisma.order.update({ where: { id: order.id }, data: { address } });
-      return xml(gatherPlay(baseUrl, "phone", `Merci. Votre numéro de téléphone ?`));
+      await prisma.order.update({ where: { id: order.id }, data: { address: speech.trim() } });
+      return xml(gatherPlay(baseUrl, "phone", "Votre numéro de téléphone ?"));
     }
 
-    // STEP: phone (delivery)
+    // phone
     if (step === "phone") {
       const order = await getOrCreateOrder();
-      const phone = speech.trim();
-      if (!phone) return xml(gatherPlay(baseUrl, "phone", `Je n’ai pas entendu. Votre numéro de téléphone ?`));
+      if (!speech.trim()) return xml(gatherPlay(baseUrl, "phone", "Votre numéro de téléphone ?"));
 
-      const updated = await prisma.order.update({ where: { id: order.id }, data: { phone } });
+      const updated = await prisma.order.update({
+        where: { id: order.id },
+        data: { phone: speech.trim() },
+      });
 
-      const recap = `Récap : une ${updated.product}. En livraison. Nom : ${updated.customerName}. Adresse : ${updated.address}. Total : ${updated.total} euros. C’est bon pour vous ?`;
+      const recap = `Récap : une ${updated.product}, en livraison. Total ${updated.total} euros. C’est bon pour vous ?`;
       return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
-    // STEP: name_takeaway
+    // name_takeaway
     if (step === "name_takeaway") {
       const order = await getOrCreateOrder();
-      const name = speech.trim();
-      if (!name) return xml(gatherPlay(baseUrl, "name_takeaway", `Je n’ai pas entendu. Quel nom pour la commande ?`));
+      if (!speech.trim()) return xml(gatherPlay(baseUrl, "name_takeaway", "Quel nom pour la commande ?"));
 
-      const updated = await prisma.order.update({ where: { id: order.id }, data: { customerName: name } });
+      const updated = await prisma.order.update({
+        where: { id: order.id },
+        data: { customerName: speech.trim() },
+      });
 
-      const recap = `Récap : une ${updated.product}. À emporter. Nom : ${updated.customerName}. Total : ${updated.total} euros. C’est bon pour vous ?`;
+      const recap = `Récap : une ${updated.product}, à emporter. Total ${updated.total} euros. C’est bon pour vous ?`;
       return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
-    // STEP: confirm
+    // confirm
     if (step === "confirm") {
       const order = await getOrCreateOrder();
 
@@ -210,8 +276,7 @@ export async function POST(req: NextRequest) {
 
         return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${ttsUrl(baseUrl, "Parfait. Merci beaucoup. À bientôt, au revoir.")}</Play>
-  <Pause length="1"/>
+  <Play>${ttsUrl(baseUrl, "Parfait. Merci beaucoup. À bientôt.")}</Play>
   <Hangup/>
 </Response>`);
       }
@@ -219,15 +284,7 @@ export async function POST(req: NextRequest) {
       if (isNo(speech)) {
         await prisma.order.update({
           where: { id: order.id },
-          data: {
-            status: "draft",
-            product: "",
-            total: 0,
-            type: "takeaway",
-            customerName: null,
-            address: null,
-            phone: null,
-          },
+          data: { status: "draft", product: "", total: 0 },
         });
 
         return xml(`<?xml version="1.0" encoding="UTF-8"?>
@@ -237,10 +294,9 @@ export async function POST(req: NextRequest) {
 </Response>`);
       }
 
-      return xml(gatherPlay(baseUrl, "confirm", `Je n’ai pas compris. Dites oui ou non. C’est bon ?`));
+      return xml(gatherPlay(baseUrl, "confirm", "Dites oui ou non. C’est bon ?"));
     }
 
-    // fallback
     return xml(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Redirect method="POST">${redirectIncoming}</Redirect>
