@@ -25,31 +25,41 @@ function ttsUrl(baseUrl: string, text: string) {
 }
 
 function normPhone(p?: string | null) {
-  return (p ?? "").trim().replace(/\s+/g, "");
+  const raw = (p ?? "").trim().replace(/\s+/g, "");
+  if (!raw) return "";
+
+  if (raw.startsWith("+")) return raw;
+  if (raw.startsWith("33")) return `+${raw}`;
+  if (raw.startsWith("0") && raw.length === 10) return `+33${raw.slice(1)}`;
+
+  return raw;
 }
 
 /**
- * ✅ Règles:
- * - si mapping twilioNumber->restaurant existe => on prend
- * - sinon si 1 seul restaurant en DB => on prend celui-là (mode single resto)
- * - sinon => null (et là tu peux choisir de refuser l’appel)
+ * ✅ Étape 1:
+ * On ne fait PLUS de fallback "single restaurant" ici.
+ * Si le numéro Twilio (To) n'est pas mappé => null.
  */
 async function resolveRestaurantId(to?: string | null) {
-  const twilioNumber = normPhone(to);
+  const normalized = normPhone(to);
+  const raw = (to ?? "").trim().replace(/\s+/g, "");
 
-  if (twilioNumber) {
+  // 1) Essai sur normalisé
+  if (normalized) {
     const mapped = await prisma.restaurant.findFirst({
-      where: { twilioNumber },
+      where: { twilioNumber: normalized },
       select: { id: true },
     });
     if (mapped?.id) return mapped.id;
   }
 
-  // fallback : si un seul restaurant en DB, on l'utilise
-  const count = await prisma.restaurant.count();
-  if (count === 1) {
-    const only = await prisma.restaurant.findFirst({ select: { id: true } });
-    return only?.id ?? null;
+  // 2) Essai sur brut (au cas où tu stockes "09..." en base)
+  if (raw) {
+    const mappedRaw = await prisma.restaurant.findFirst({
+      where: { twilioNumber: raw },
+      select: { id: true },
+    });
+    if (mappedRaw?.id) return mappedRaw.id;
   }
 
   return null;
@@ -129,6 +139,14 @@ function gatherPlay(baseUrl: string, step: string, text: string) {
 </Response>`;
 }
 
+function notConfiguredTwiml(baseUrl: string) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${ttsUrl(baseUrl, "Ce numéro n’est pas encore configuré. Merci de contacter le restaurant.")}</Play>
+  <Hangup/>
+</Response>`;
+}
+
 export async function POST(req: NextRequest) {
   const baseUrl = getBaseUrl(req);
   const redirectIncoming = `${baseUrl}/api/twilio/voice/incoming`;
@@ -144,9 +162,10 @@ export async function POST(req: NextRequest) {
 
     const restaurantId = await resolveRestaurantId(to);
 
-    // ✅ option: si tu veux refuser quand pas de resto trouvé
-    // si (restaurantId == null) => message + hangup
-    // pour l’instant on laisse le fallback single-resto faire le job
+    // ✅ Étape 1: si pas de restaurant => on stoppe tout
+    if (!restaurantId) {
+      return xml(notConfiguredTwiml(baseUrl));
+    }
 
     async function getOrCreateOrder() {
       if (!callSid) {
