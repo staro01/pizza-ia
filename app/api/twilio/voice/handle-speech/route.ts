@@ -27,11 +27,9 @@ function ttsUrl(baseUrl: string, text: string) {
 function normPhone(p?: string | null) {
   const raw = (p ?? "").trim().replace(/\s+/g, "");
   if (!raw) return "";
-
   if (raw.startsWith("+")) return raw;
   if (raw.startsWith("33")) return `+${raw}`;
   if (raw.startsWith("0") && raw.length === 10) return `+33${raw.slice(1)}`;
-
   return raw;
 }
 
@@ -60,9 +58,9 @@ async function resolveRestaurantId(to?: string | null) {
 
 /** ========= MENU TEST ========= */
 const PIZZAS = [
-  { key: "margherita", label: "Margherita", price: 10, ingredients: ["tomate", "mozzarella", "basilic"] },
-  { key: "reine", label: "Reine", price: 11, ingredients: ["tomate", "mozzarella", "jambon", "champignons"] },
-  { key: "pepperoni", label: "Pepperoni", price: 12, ingredients: ["tomate", "mozzarella", "pepperoni"] },
+  { key: "margherita", label: "Margherita", price: 10 },
+  { key: "reine", label: "Reine", price: 11 },
+  { key: "pepperoni", label: "Pepperoni", price: 12 },
 ];
 
 const DRINKS = [
@@ -89,16 +87,13 @@ function norm(s: string) {
 }
 
 /**
- * Nettoyage pour éviter que "s'il vous plaît", "merci", "je voudrais" etc
- * polluent la compréhension.
+ * Nettoyage.
+ * But: ne pas polluer le parsing avec "svp", "merci", etc.
  */
 function sanitizeSpeech(s: string) {
   let t = norm(s);
-
-  // enlever ponctuation simple
   t = t.replace(/[!?.,;:]/g, " ");
 
-  // phrases de politesse fréquentes
   const trash = [
     "s il vous plait",
     "s'il vous plait",
@@ -114,7 +109,6 @@ function sanitizeSpeech(s: string) {
   ];
   for (const x of trash) t = t.replaceAll(x, " ");
 
-  // tournures "je veux / je voudrais / je prends..."
   const starters = [
     "je voudrais",
     "j'aimerais",
@@ -139,7 +133,6 @@ function sanitizeSpeech(s: string) {
     }
   }
 
-  // nettoyage espaces
   t = t.replace(/\s+/g, " ").trim();
   return t;
 }
@@ -152,6 +145,24 @@ function isYes(s: string) {
 function isNo(s: string) {
   const t = norm(s);
   return t === "non" || t.includes("non");
+}
+
+function isDone(s: string) {
+  const t = norm(s);
+  return (
+    t.includes("c'est tout") ||
+    t.includes("ce sera tout") ||
+    t.includes("c’est tout") ||
+    t.includes("rien d'autre") ||
+    t.includes("rien d’autre") ||
+    t.includes("terminé") ||
+    t.includes("fini")
+  );
+}
+
+function wantsChange(s: string) {
+  const t = norm(s);
+  return t.includes("changer") || t.includes("modifie") || t.includes("finalement") || t.includes("en fait");
 }
 
 function wantsMenu(s: string) {
@@ -167,11 +178,11 @@ function wantsMenu(s: string) {
   );
 }
 
-// Si le client demande spécifiquement boissons/desserts
 function wantsDrinksMenu(s: string) {
   const t = norm(s);
   return t.includes("boisson") || t.includes("à boire") || t.includes("a boire") || t.includes("soda") || t.includes("coca");
 }
+
 function wantsDessertsMenu(s: string) {
   const t = norm(s);
   return t.includes("dessert") || t.includes("sucré") || t.includes("sucre") || t.includes("tiramisu") || t.includes("brownie");
@@ -221,7 +232,7 @@ type CartItem = {
 
 type Cart = {
   items: CartItem[];
-  askedExtras?: boolean; // a-t-on déjà proposé boissons/desserts ?
+  askedExtras?: boolean;
 };
 
 function safeParseCart(raw: string | null | undefined): Cart {
@@ -250,109 +261,95 @@ function findPizzaInText(s: string) {
   const t = sanitizeSpeech(s);
   return PIZZAS.find((p) => t.includes(p.key) || t.includes(norm(p.label))) ?? null;
 }
+
 function findDrinkInText(s: string) {
   const t = sanitizeSpeech(s);
   return DRINKS.find((d) => t.includes(d.key) || t.includes(norm(d.label))) ?? null;
 }
+
 function findDessertInText(s: string) {
   const t = sanitizeSpeech(s);
   return DESSERTS.find((d) => t.includes(d.key) || t.includes(norm(d.label))) ?? null;
 }
 
-/** ========= Suppléments / sans ========= */
-function detectToppingsAdd(s: string) {
-  const t = sanitizeSpeech(s);
-  const adds: string[] = [];
-  for (const top of TOPPINGS) {
-    if (t.includes(top.key) || t.includes(norm(top.label))) adds.push(top.label);
-  }
-  return Array.from(new Set(adds));
-}
-
-/**
- * Amélioration "sans":
- * - gère "sans champignons", "sans champignons et olives", "sans oignons, sans fromage"
- * - nettoie pluriels basiques
- * - ne prend pas "s'il vous plaît"
+/** ========= “sans …” (FIX) =========
+ * Problème actuel : ça capturait toute la phrase.
+ * Ici : on capture juste ce qui suit "sans" jusqu’à :
+ * - "avec"
+ * - "plus"
+ * - "ajoute"
+ * - "et une / et un / et deux / ..."
+ * - fin
  */
-function normalizeIngredientWord(w: string) {
+function normalizeWord(w: string) {
   let x = norm(w).replace(/[!?.,;:]/g, "").trim();
-  if (!x) return "";
-  // enlever articles
   x = x.replace(/^(de|du|des|la|le|les|un|une)\s+/g, "");
-  // pluriel très simple
   if (x.endsWith("s") && x.length > 3) x = x.slice(0, -1);
   return x.trim();
 }
 
-const COMMON_INGREDIENTS = [
-  "champignon",
-  "oignon",
-  "olive",
-  "fromage",
-  "mozzarella",
-  "jambon",
-  "pepperoni",
-  "basilic",
-  "tomate",
-  "sauce",
-];
-
 function detectRemovals(s: string) {
-  const t0 = sanitizeSpeech(s);
-  if (!t0.includes("sans")) return [];
+  const t = sanitizeSpeech(s);
+  if (!t.includes("sans")) return [];
 
-  // On prend tout ce qui suit chaque "sans"
-  const parts = t0.split("sans").map((x) => x.trim()).filter(Boolean);
-  // Exemple: ["je veux une reine", "champignons et olives", "oignons"]
-  // On ignore la partie avant le 1er "sans" si la phrase commence par autre chose.
   const removals: string[] = [];
 
-  for (let i = 1; i < parts.length + 1; i++) {
-    const chunk = parts[i - 1];
-    // chunk peut contenir la commande, on coupe à des mots qui changent de sujet
-    const stopWords = ["avec", "plus", "ajoute", "et aussi", "puis", "boisson", "dessert"];
-    let c = chunk;
+  // On récupère chaque "sans ...".
+  const re = /sans\s+(.+?)(?=\bavec\b|\bplus\b|\bajoute\b|\bet\s+(?:un|une|deux|trois|quatre|\d)\b|$)/gi;
+  let m: RegExpExecArray | null;
 
-    for (const sw of stopWords) {
-      const idx = c.indexOf(sw);
-      if (idx !== -1) c = c.slice(0, idx).trim();
-    }
+  while ((m = re.exec(t))) {
+    const chunk = (m[1] ?? "").trim();
+    if (!chunk) continue;
 
-    // séparer sur "et" et virgules
-    const tokens = c
+    // chunk peut être: "champignons et olives"
+    const parts = chunk
       .split(/,| et /g)
       .map((x) => x.trim())
       .filter(Boolean);
 
-    for (const tok of tokens) {
-      const w = normalizeIngredientWord(tok);
+    for (const p of parts) {
+      const w = normalizeWord(p);
       if (!w) continue;
 
-      // Si c’est un topping connu (champignons/olives/fromage…), on le remonte proprement
-      const top = TOPPINGS.find((x) => norm(x.label).includes(w) || norm(x.key).includes(w));
-      if (top) {
-        removals.push(top.label);
-        continue;
-      }
-
-      // si ingrédient commun, on le garde
-      if (COMMON_INGREDIENTS.some((ci) => w.includes(ci))) {
-        removals.push(w);
-        continue;
-      }
-
-      // sinon, on garde quand même (ex: "anchois") mais nettoyé
-      removals.push(w);
+      // si c’est un topping connu, on renvoie son label propre
+      const top = TOPPINGS.find((x) => w.includes(norm(x.key)) || w.includes(norm(x.label)));
+      if (top) removals.push(top.label);
+      else removals.push(w);
     }
   }
 
   return Array.from(new Set(removals)).slice(0, 6);
 }
 
-/** ========= Multi-items dans une phrase =========
- * On split surtout sur virgules et ";"
- * On évite de splitter sur "et" trop agressivement (ça casse "sans X et Y").
+/** ========= “avec …” (FIX) =========
+ * Avant : si la phrase contenait "champignons" dans "sans champignons",
+ * ça ajoutait Champignons en additions.
+ * Ici : on n’ajoute des toppings QUE si on trouve un vrai déclencheur:
+ * "avec", "en plus", "supplément", "ajoute".
+ */
+function detectToppingsAdd(s: string) {
+  const t = sanitizeSpeech(s);
+  const triggers = ["avec ", "en plus", "supplément", "supplement", "ajoute", "rajoute"];
+
+  const hasTrigger = triggers.some((tr) => t.includes(tr));
+  if (!hasTrigger) return [];
+
+  // On prend ce qui suit "avec" si présent, sinon toute la phrase (mais trigger obligatoire)
+  let scope = t;
+  const idx = t.indexOf("avec ");
+  if (idx !== -1) scope = t.slice(idx + 5);
+
+  const adds: string[] = [];
+  for (const top of TOPPINGS) {
+    if (scope.includes(top.key) || scope.includes(norm(top.label))) adds.push(top.label);
+  }
+  return Array.from(new Set(adds));
+}
+
+/** ========= Segments =========
+ * On split sur virgules / points / point-virgule.
+ * On évite de split sur "et" (ça casse "sans X et Y").
  */
 function splitSegments(s: string) {
   const t = sanitizeSpeech(s);
@@ -361,18 +358,10 @@ function splitSegments(s: string) {
   return raw.length ? raw : [t];
 }
 
-type Parsed = {
-  items: CartItem[];
-  // rems/adds globaux si l'utilisateur les dit sans répéter la pizza
-  globalAdds: string[];
-  globalRems: string[];
-};
-
-function parseUtteranceToItems(s: string): Parsed {
-  const items: CartItem[] = [];
+/** ========= Parse phrase -> items ========= */
+function parseUtteranceToItems(s: string) {
   const segs = splitSegments(s);
-  const globalAdds = detectToppingsAdd(s);
-  const globalRems = detectRemovals(s);
+  const allItems: CartItem[] = [];
 
   for (const seg of segs) {
     const qty = detectQty(seg);
@@ -382,40 +371,77 @@ function parseUtteranceToItems(s: string): Parsed {
     const dessert = findDessertInText(seg);
 
     if (pizza) {
-      const adds = detectToppingsAdd(seg);
       const rems = detectRemovals(seg);
+      let adds = detectToppingsAdd(seg);
 
-      const finalAdds = Array.from(new Set([...adds, ...globalAdds]));
-      const finalRems = Array.from(new Set([...rems, ...globalRems]));
+      // ✅ important: un ingrédient en removals ne doit jamais être aussi en additions
+      const remNorm = new Set(rems.map((r) => norm(r)));
+      adds = adds.filter((a) => !remNorm.has(norm(a)));
 
-      const addPrice = finalAdds.reduce(
-        (sum, a) => sum + (TOPPINGS.find((x) => x.label === a)?.price ?? 0),
-        0
-      );
+      const addPrice = adds.reduce((sum, a) => sum + (TOPPINGS.find((x) => x.label === a)?.price ?? 0), 0);
 
-      items.push({
+      allItems.push({
         kind: "pizza",
         name: pizza.label,
         qty,
-        additions: finalAdds.length ? finalAdds : undefined,
-        removals: finalRems.length ? finalRems : undefined,
+        additions: adds.length ? adds : undefined,
+        removals: rems.length ? rems : undefined,
         unitPrice: pizza.price + addPrice,
       });
       continue;
     }
 
     if (drink) {
-      items.push({ kind: "drink", name: drink.label, qty, unitPrice: drink.price });
+      allItems.push({ kind: "drink", name: drink.label, qty, unitPrice: drink.price });
       continue;
     }
 
     if (dessert) {
-      items.push({ kind: "dessert", name: dessert.label, qty, unitPrice: dessert.price });
+      allItems.push({ kind: "dessert", name: dessert.label, qty, unitPrice: dessert.price });
       continue;
+    }
+
+    // Cas fréquent: "une reine sans champignons et une pepperoni"
+    // On ne split pas sur "et". Donc on essaie une 2e passe "et une / et un".
+    const t = sanitizeSpeech(seg);
+    const subParts = t.split(/\bet\s+(?:un|une|deux|trois|quatre|\d)\b/g).map((x) => x.trim()).filter(Boolean);
+    if (subParts.length > 1) {
+      for (const sp of subParts) {
+        const pz = findPizzaInText(sp);
+        const dr = findDrinkInText(sp);
+        const ds = findDessertInText(sp);
+        const q = detectQty(sp);
+
+        if (pz) {
+          const rems = detectRemovals(sp);
+          let adds = detectToppingsAdd(sp);
+          const remNorm = new Set(rems.map((r) => norm(r)));
+          adds = adds.filter((a) => !remNorm.has(norm(a)));
+          const addPrice = adds.reduce((sum, a) => sum + (TOPPINGS.find((x) => x.label === a)?.price ?? 0), 0);
+
+          allItems.push({
+            kind: "pizza",
+            name: pz.label,
+            qty: q,
+            additions: adds.length ? adds : undefined,
+            removals: rems.length ? rems : undefined,
+            unitPrice: pz.price + addPrice,
+          });
+          continue;
+        }
+        if (dr) {
+          allItems.push({ kind: "drink", name: dr.label, qty: q, unitPrice: dr.price });
+          continue;
+        }
+        if (ds) {
+          allItems.push({ kind: "dessert", name: ds.label, qty: q, unitPrice: ds.price });
+          continue;
+        }
+      }
     }
   }
 
-  return { items, globalAdds, globalRems };
+  return allItems;
 }
 
 /** ========= Récap ========= */
@@ -434,23 +460,14 @@ function recapSentence(cart: Cart) {
   return `Je récapitule : ${lines}. Total ${total} euros. Vous confirmez ?`;
 }
 
-/** ========= Intentions ========= */
-function isDone(s: string) {
-  const t = norm(s);
-  return (
-    t.includes("c'est tout") ||
-    t.includes("ce sera tout") ||
-    t.includes("c’est tout") ||
-    t.includes("rien d'autre") ||
-    t.includes("rien d’autre") ||
-    t.includes("terminé") ||
-    t.includes("fini")
-  );
-}
-
-function wantsChange(s: string) {
-  const t = norm(s);
-  return t.includes("changer") || t.includes("modifie") || t.includes("finalement") || t.includes("en fait");
+/** ========= Product summary (FIX) =========
+ * On remet un résumé pizzas dans Order.product.
+ * Exemple: "Pepperoni x1, Reine x1"
+ */
+function productSummary(cart: Cart) {
+  const pizzas = cart.items.filter((i) => i.kind === "pizza");
+  if (pizzas.length === 0) return "";
+  return pizzas.map((p) => `${p.name} x${p.qty}`).join(", ");
 }
 
 /** ========= TwiML gather ========= */
@@ -507,10 +524,9 @@ export async function POST(req: NextRequest) {
     const step = url.searchParams.get("step") ?? "listen";
 
     const form = await req.formData();
-    const speechRaw = (form.get("SpeechResult") ?? "").toString();
-    const speech = speechRaw.trim();
-    const callSid = (form.get("CallSid") ?? "").toString();
-    const to = (form.get("To") ?? "").toString();
+    const speech = ((form.get("SpeechResult") ?? "") as string).toString().trim();
+    const callSid = ((form.get("CallSid") ?? "") as string).toString();
+    const to = ((form.get("To") ?? "") as string).toString();
 
     const restaurantId = await resolveRestaurantId(to);
     if (!restaurantId) return xml(notConfiguredTwiml(baseUrl));
@@ -542,30 +558,35 @@ export async function POST(req: NextRequest) {
       return { order, cart };
     }
 
+    // ✅ FIX: on sauve extras + total + product
     async function saveCart(orderId: string, cart: Cart) {
       const total = cartTotal(cart);
+      const prod = productSummary(cart);
+
       await prisma.order.update({
         where: { id: orderId },
-        data: { extras: JSON.stringify(cart), total },
+        data: {
+          extras: JSON.stringify(cart),
+          total,
+          product: prod,
+        },
       });
     }
 
-    /** ======== listen : focus pizzas au début ======== */
+    /** ===== listen : pizzas ===== */
     if (step === "listen") {
       const order = await getOrCreateOrder();
       const { cart } = await loadCart(order.id);
 
       if (!speech) {
-        return xml(
-          gatherPlay(
-            baseUrl,
-            "listen",
-            "Dites-moi les pizzas que vous voulez. Par exemple : une Reine sans champignons."
-          )
-        );
+        return xml(gatherPlay(baseUrl, "listen", "Dites-moi les pizzas que vous voulez."));
       }
 
-      // Si le client demande des boissons/desserts explicitement : on répond, mais on ne déroule pas tout.
+      if (wantsMenu(speech)) {
+        return xml(gatherPlay(baseUrl, "listen", pizzasMenuSentence()));
+      }
+
+      // si quelqu'un demande déjà "boissons/desserts" ici, on peut répondre
       if (wantsDrinksMenu(speech)) {
         return xml(gatherPlay(baseUrl, "listen", `${drinksMenuSentence()} Dites-moi ce que vous voulez.`));
       }
@@ -573,19 +594,11 @@ export async function POST(req: NextRequest) {
         return xml(gatherPlay(baseUrl, "listen", `${dessertsMenuSentence()} Dites-moi ce que vous voulez.`));
       }
 
-      // Menu (pizzas seulement)
-      if (wantsMenu(speech)) {
-        return xml(gatherPlay(baseUrl, "listen", pizzasMenuSentence()));
-      }
-
-      // Parse naturel (avec nettoyage)
-      const parsed = parseUtteranceToItems(speech);
-
-      if (parsed.items.length > 0) {
-        cart.items.push(...parsed.items);
+      const items = parseUtteranceToItems(speech);
+      if (items.length > 0) {
+        cart.items.push(...items);
         await saveCart(order.id, cart);
 
-        // Si la personne dit déjà "c'est tout", on passe à la proposition extras (si pizzas)
         if (isDone(speech)) {
           if (hasAnyPizza(cart) && !cart.askedExtras) {
             cart.askedExtras = true;
@@ -602,22 +615,21 @@ export async function POST(req: NextRequest) {
         gatherPlay(
           baseUrl,
           "listen",
-          "Je n’ai pas compris. Dites par exemple : une Reine sans champignons, ou une Margherita avec fromage. Si vous voulez, je peux vous lire les pizzas."
+          "Je n’ai pas compris. Dites par exemple : une Reine sans champignons, et une Pepperoni."
         )
       );
     }
 
-    /** ======== more : on continue les pizzas ======== */
+    /** ===== more : autres pizzas ===== */
     if (step === "more") {
       const order = await getOrCreateOrder();
       const { cart } = await loadCart(order.id);
 
       if (!speech) return xml(gatherPlay(baseUrl, "more", "Voulez-vous ajouter une autre pizza ?"));
 
-      // Si le client répond par une pizza (ou autre), on ajoute
-      const parsed = parseUtteranceToItems(speech);
-      if (parsed.items.length > 0) {
-        cart.items.push(...parsed.items);
+      const items = parseUtteranceToItems(speech);
+      if (items.length > 0) {
+        cart.items.push(...items);
         await saveCart(order.id, cart);
         return xml(gatherPlay(baseUrl, "more", "Très bien. Voulez-vous ajouter une autre pizza ?"));
       }
@@ -627,31 +639,42 @@ export async function POST(req: NextRequest) {
       }
 
       if (isNo(speech) || isDone(speech)) {
-        // ✅ Ici : une fois les pizzas finies, on propose boissons/desserts
         if (hasAnyPizza(cart) && !cart.askedExtras) {
           cart.askedExtras = true;
           await saveCart(order.id, cart);
           return xml(gatherPlay(baseUrl, "extras", "Très bien. Voulez-vous une boisson ou un dessert ?"));
         }
-
         return xml(gatherPlay(baseUrl, "recap", recapSentence(cart)));
       }
 
-      return xml(gatherPlay(baseUrl, "more", "D’accord. Voulez-vous ajouter une autre pizza ?"));
+      return xml(gatherPlay(baseUrl, "more", "Voulez-vous ajouter une autre pizza ?"));
     }
 
-    /** ======== extras : boissons/desserts ======== */
+    /** ===== extras : boissons/desserts ===== */
     if (step === "extras") {
       const order = await getOrCreateOrder();
       const { cart } = await loadCart(order.id);
 
       if (!speech) return xml(gatherPlay(baseUrl, "extras", "Voulez-vous une boisson ou un dessert ?"));
 
+      // ✅ FIX: si client dit "vous avez quoi" => on lit la liste
+      if (wantsMenu(speech) || speech.toLowerCase().includes("vous avez quoi")) {
+        const msg = `${drinksMenuSentence()} ${dessertsMenuSentence()} Dites-moi ce que vous voulez.`;
+        return xml(gatherPlay(baseUrl, "extras", msg));
+      }
+
+      // si le client demande spécifiquement boissons/desserts
+      if (wantsDrinksMenu(speech)) {
+        return xml(gatherPlay(baseUrl, "extras", `${drinksMenuSentence()} Dites-moi ce que vous voulez.`));
+      }
+      if (wantsDessertsMenu(speech)) {
+        return xml(gatherPlay(baseUrl, "extras", `${dessertsMenuSentence()} Dites-moi ce que vous voulez.`));
+      }
+
       if (isNo(speech) || isDone(speech)) {
         return xml(gatherPlay(baseUrl, "recap", recapSentence(cart)));
       }
 
-      // si le client dit "oui" mais pas de produit, on suggère (sans lire tout le menu)
       if (isYes(speech)) {
         return xml(
           gatherPlay(
@@ -662,15 +685,14 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // parse naturel
-      const parsed = parseUtteranceToItems(speech);
-      if (parsed.items.length > 0) {
-        cart.items.push(...parsed.items);
+      const items = parseUtteranceToItems(speech);
+      if (items.length > 0) {
+        cart.items.push(...items);
         await saveCart(order.id, cart);
         return xml(gatherPlay(baseUrl, "extras_more", "Très bien. Voulez-vous autre chose ?"));
       }
 
-      return xml(gatherPlay(baseUrl, "extras", "Je n’ai pas compris. Dites une boisson ou un dessert, par exemple un Coca ou un Tiramisu."));
+      return xml(gatherPlay(baseUrl, "extras", "Je n’ai pas compris. Dites une boisson ou un dessert, ou dites “vous avez quoi ?”."));
     }
 
     if (step === "extras_more") {
@@ -679,9 +701,14 @@ export async function POST(req: NextRequest) {
 
       if (!speech) return xml(gatherPlay(baseUrl, "extras_more", "Voulez-vous autre chose ?"));
 
-      const parsed = parseUtteranceToItems(speech);
-      if (parsed.items.length > 0) {
-        cart.items.push(...parsed.items);
+      if (wantsMenu(speech) || speech.toLowerCase().includes("vous avez quoi")) {
+        const msg = `${drinksMenuSentence()} ${dessertsMenuSentence()} Dites-moi ce que vous voulez.`;
+        return xml(gatherPlay(baseUrl, "extras_more", msg));
+      }
+
+      const items = parseUtteranceToItems(speech);
+      if (items.length > 0) {
+        cart.items.push(...items);
         await saveCart(order.id, cart);
         return xml(gatherPlay(baseUrl, "extras_more", "Très bien. Voulez-vous autre chose ?"));
       }
@@ -697,7 +724,7 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "extras_more", "Voulez-vous autre chose ?"));
     }
 
-    /** ======== recap + edit ======== */
+    /** ===== recap + edit ===== */
     if (step === "recap") {
       const order = await getOrCreateOrder();
       const { cart } = await loadCart(order.id);
@@ -742,7 +769,7 @@ export async function POST(req: NextRequest) {
             await saveCart(order.id, cart);
             return xml(gatherPlay(baseUrl, "recap", `Ok, j’enlève ${targetName}. ${recapSentence(cart)}`));
           }
-          return xml(gatherPlay(baseUrl, "edit", `Je ne vois pas ${targetName} dans la commande. Dites-moi ce que vous voulez enlever.`));
+          return xml(gatherPlay(baseUrl, "edit", `Je ne vois pas ${targetName} dans la commande.`));
         }
 
         if (cart.items.length > 0) {
@@ -751,20 +778,22 @@ export async function POST(req: NextRequest) {
           return xml(gatherPlay(baseUrl, "recap", `Ok, j’enlève ${removed.name}. ${recapSentence(cart)}`));
         }
 
-        return xml(gatherPlay(baseUrl, "edit", "Il n’y a rien à enlever. Dites-moi ce que vous voulez ajouter."));
+        return xml(gatherPlay(baseUrl, "edit", "Il n’y a rien à enlever."));
       }
 
       // Ajouter via parsing
-      const parsed = parseUtteranceToItems(speech);
-      if (parsed.items.length > 0) {
-        cart.items.push(...parsed.items);
+      const items = parseUtteranceToItems(speech);
+      if (items.length > 0) {
+        cart.items.push(...items);
         await saveCart(order.id, cart);
         return xml(gatherPlay(baseUrl, "recap", `Ok. ${recapSentence(cart)}`));
       }
 
-      // Appliquer "sans" / "avec" à la dernière pizza
+      // Appliquer "sans/avec" sur la dernière pizza
       const rems = detectRemovals(speech);
-      const adds = detectToppingsAdd(speech);
+      let adds = detectToppingsAdd(speech);
+      const remNorm = new Set(rems.map((r) => norm(r)));
+      adds = adds.filter((a) => !remNorm.has(norm(a)));
 
       if (rems.length || adds.length) {
         for (let i = cart.items.length - 1; i >= 0; i--) {
@@ -775,23 +804,18 @@ export async function POST(req: NextRequest) {
           it.additions = Array.from(new Set([...(it.additions ?? []), ...adds]));
 
           const basePrice = PIZZAS.find((p) => p.label === it.name)?.price ?? it.unitPrice;
-          const addPrice = (it.additions ?? []).reduce(
-            (sum, a) => sum + (TOPPINGS.find((x) => x.label === a)?.price ?? 0),
-            0
-          );
+          const addPrice = (it.additions ?? []).reduce((sum, a) => sum + (TOPPINGS.find((x) => x.label === a)?.price ?? 0), 0);
           it.unitPrice = basePrice + addPrice;
 
           await saveCart(order.id, cart);
           return xml(gatherPlay(baseUrl, "recap", `D’accord. ${recapSentence(cart)}`));
         }
-
-        return xml(gatherPlay(baseUrl, "edit", "D’accord, mais je ne vois pas de pizza à modifier. Dites-moi ce que vous voulez ajouter."));
       }
 
       return xml(gatherPlay(baseUrl, "edit", "Je n’ai pas compris. Dites : enlève le Coca, ou ajoute une Reine sans champignons."));
     }
 
-    /** ======== Livraison / emporter ======== */
+    /** ===== Livraison / emporter ===== */
     if (step === "type") {
       const order = await getOrCreateOrder();
       const t = norm(speech);
@@ -813,7 +837,7 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "name", "Très bien. Quel est votre nom pour la commande ?"));
     }
 
-    /** ======== Nom ======== */
+    /** ===== Nom ===== */
     if (step === "name") {
       const order = await getOrCreateOrder();
       const name = speech.trim();
@@ -823,7 +847,7 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "phone", "Merci. Quel est votre numéro de téléphone ?"));
     }
 
-    /** ======== Téléphone ======== */
+    /** ===== Téléphone ===== */
     if (step === "phone") {
       const order = await getOrCreateOrder();
       const phone = speech.trim();
@@ -844,7 +868,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /** ======== Adresse complète ======== */
+    /** ===== Adresse complète ===== */
     if (step === "addr_full") {
       const order = await getOrCreateOrder();
       const addr = speech.trim();
