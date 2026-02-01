@@ -26,41 +26,33 @@ function ttsUrl(baseUrl: string, text: string) {
 /**
  * Normalisation simple pour éviter les bugs de format.
  * Twilio envoie souvent du E.164: +339...
- * Si tu as en base 0948... on tente de convertir.
  */
 function normPhone(p?: string | null) {
   const raw = (p ?? "").trim().replace(/\s+/g, "");
   if (!raw) return "";
 
-  // Déjà en E.164
   if (raw.startsWith("+")) return raw;
-
-  // "33xxxxxxxxx" -> "+33xxxxxxxxx"
   if (raw.startsWith("33")) return `+${raw}`;
-
-  // "0XXXXXXXXX" (FR 10 chiffres) -> "+33XXXXXXXXX"
   if (raw.startsWith("0") && raw.length === 10) return `+33${raw.slice(1)}`;
 
   return raw;
 }
 
 async function findRestaurantByTo(to: string) {
-  const twilioNumber = normPhone(to);
-  if (!twilioNumber) return null;
-
-  // On tente match direct
-  const direct = await prisma.restaurant.findFirst({
-    where: { twilioNumber },
-  });
-  if (direct) return direct;
-
-  // On tente aussi match sur l'autre format (au cas où tu as stocké "09..." en base)
+  const normalized = normPhone(to);
   const raw = (to ?? "").trim().replace(/\s+/g, "");
-  if (!raw) return null;
 
-  return prisma.restaurant.findFirst({
-    where: { twilioNumber: raw },
-  });
+  if (normalized) {
+    const direct = await prisma.restaurant.findFirst({ where: { twilioNumber: normalized } });
+    if (direct) return direct;
+  }
+
+  if (raw) {
+    const rawMatch = await prisma.restaurant.findFirst({ where: { twilioNumber: raw } });
+    if (rawMatch) return rawMatch;
+  }
+
+  return null;
 }
 
 function buildTwimlConfigured(req: Request, greetText: string) {
@@ -101,21 +93,19 @@ export async function POST(req: Request) {
 
   const restaurant = await findRestaurantByTo(to);
 
-  // ✅ Étape 1: si pas de restaurant trouvé => on refuse
   if (!restaurant) {
     return xml(buildTwimlNotConfigured(req));
   }
 
+  // ✅ Nouveau greeting demandé
   const greet = restaurant?.name
-    ? `Bonjour, ici ${restaurant.name}. Je vous écoute pour votre commande.`
-    : "Bonjour, ici la pizzeria. Je vous écoute pour votre commande.";
+    ? `Bonjour, pizzeria ${restaurant.name}. Puis-je prendre votre commande ?`
+    : "Bonjour, pizzeria. Puis-je prendre votre commande ?";
 
   return xml(buildTwimlConfigured(req, greet));
 }
 
 // GET (debug browser)
 export async function GET(req: Request) {
-  // En debug navigateur, on affiche juste un message neutre.
-  // Ici on ne peut pas connaître "To" car pas de POST Twilio.
-  return xml(buildTwimlConfigured(req, "Bonjour, ici la pizzeria. Je vous écoute pour votre commande."));
+  return xml(buildTwimlConfigured(req, "Bonjour, pizzeria. Puis-je prendre votre commande ?"));
 }
