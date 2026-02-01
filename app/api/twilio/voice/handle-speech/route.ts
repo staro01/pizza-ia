@@ -21,33 +21,39 @@ function getBaseUrl(req: NextRequest) {
 }
 
 function ttsUrl(baseUrl: string, text: string) {
-  // ✅ TTS qui fonctionne (ULAW)
   return `${baseUrl}/api/tts/audio.ulaw?text=${encodeURIComponent(text)}`;
 }
-
-/* =========================
-   Helpers restaurant / tel
-========================= */
 
 function normPhone(p?: string | null) {
   return (p ?? "").trim().replace(/\s+/g, "");
 }
 
-async function findRestaurantIdByTo(to?: string | null) {
+/**
+ * ✅ Règles:
+ * - si mapping twilioNumber->restaurant existe => on prend
+ * - sinon si 1 seul restaurant en DB => on prend celui-là (mode single resto)
+ * - sinon => null (et là tu peux choisir de refuser l’appel)
+ */
+async function resolveRestaurantId(to?: string | null) {
   const twilioNumber = normPhone(to);
-  if (!twilioNumber) return null;
 
-  const r = await prisma.restaurant.findFirst({
-    where: { twilioNumber },
-    select: { id: true },
-  });
+  if (twilioNumber) {
+    const mapped = await prisma.restaurant.findFirst({
+      where: { twilioNumber },
+      select: { id: true },
+    });
+    if (mapped?.id) return mapped.id;
+  }
 
-  return r?.id ?? null;
+  // fallback : si un seul restaurant en DB, on l'utilise
+  const count = await prisma.restaurant.count();
+  if (count === 1) {
+    const only = await prisma.restaurant.findFirst({ select: { id: true } });
+    return only?.id ?? null;
+  }
+
+  return null;
 }
-
-/* =========================
-   Menu / NLP simple
-========================= */
 
 const MENU = [
   { key: "margherita", label: "Margherita", price: 10 },
@@ -123,10 +129,6 @@ function gatherPlay(baseUrl: string, step: string, text: string) {
 </Response>`;
 }
 
-/* =========================
-   Handler principal
-========================= */
-
 export async function POST(req: NextRequest) {
   const baseUrl = getBaseUrl(req);
   const redirectIncoming = `${baseUrl}/api/twilio/voice/incoming`;
@@ -140,7 +142,11 @@ export async function POST(req: NextRequest) {
     const callSid = (form.get("CallSid") ?? "").toString();
     const to = (form.get("To") ?? "").toString();
 
-    const restaurantId = await findRestaurantIdByTo(to);
+    const restaurantId = await resolveRestaurantId(to);
+
+    // ✅ option: si tu veux refuser quand pas de resto trouvé
+    // si (restaurantId == null) => message + hangup
+    // pour l’instant on laisse le fallback single-resto faire le job
 
     async function getOrCreateOrder() {
       if (!callSid) {
@@ -182,9 +188,6 @@ export async function POST(req: NextRequest) {
       return order;
     }
 
-    /* ====== STEPS ====== */
-
-    // listen
     if (step === "listen") {
       const order = await getOrCreateOrder();
 
@@ -205,7 +208,6 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "type", `Ok, une ${pizza.label}. Livraison ou à emporter ?`));
     }
 
-    // type
     if (step === "type") {
       const order = await getOrCreateOrder();
       const type = detectType(speech);
@@ -221,7 +223,6 @@ export async function POST(req: NextRequest) {
         : xml(gatherPlay(baseUrl, "name_takeaway", "Quel nom pour la commande ?"));
     }
 
-    // name (delivery)
     if (step === "name") {
       const order = await getOrCreateOrder();
       if (!speech.trim()) return xml(gatherPlay(baseUrl, "name", "Votre nom s’il vous plaît ?"));
@@ -230,7 +231,6 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "address", "Votre adresse complète ?"));
     }
 
-    // address
     if (step === "address") {
       const order = await getOrCreateOrder();
       if (!speech.trim()) return xml(gatherPlay(baseUrl, "address", "Votre adresse complète ?"));
@@ -239,7 +239,6 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "phone", "Votre numéro de téléphone ?"));
     }
 
-    // phone
     if (step === "phone") {
       const order = await getOrCreateOrder();
       if (!speech.trim()) return xml(gatherPlay(baseUrl, "phone", "Votre numéro de téléphone ?"));
@@ -253,7 +252,6 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
-    // name_takeaway
     if (step === "name_takeaway") {
       const order = await getOrCreateOrder();
       if (!speech.trim()) return xml(gatherPlay(baseUrl, "name_takeaway", "Quel nom pour la commande ?"));
@@ -267,7 +265,6 @@ export async function POST(req: NextRequest) {
       return xml(gatherPlay(baseUrl, "confirm", recap));
     }
 
-    // confirm
     if (step === "confirm") {
       const order = await getOrCreateOrder();
 
