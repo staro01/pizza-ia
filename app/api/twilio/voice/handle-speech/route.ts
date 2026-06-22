@@ -140,6 +140,10 @@ export async function POST(req: NextRequest) {
       menu[item.category].push({ name: item.name, price: item.price, description: item.description, available: item.available });
     }
 
+
+    if (menuItems.length === 0) {
+      return xml(hangupTwiml("Bonjour, notre système de commande n'est pas encore configuré. Merci de nous appeler directement."));
+    }
     const history = await loadHistory(callSid);
     history.push({ role: "user", content: speech || "[silence]" });
 

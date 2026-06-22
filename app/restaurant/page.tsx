@@ -18,9 +18,12 @@ type Order = {
   address?: string;
 };
 
-function formatTime(iso: string) {
+function formatDateTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  if (isToday) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function badgeStyle() {
@@ -203,7 +206,7 @@ export default function RestaurantPage() {
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span style={badgeStyle()}>{isDelivery ? "🚚 Livraison" : "🥡 À emporter"}</span>
-            <span style={badgeStyle()}>⏱ {formatTime(o.createdAt)}</span>
+            <span style={badgeStyle()}>⏱ {formatDateTime(o.createdAt)}</span>
             <span style={badgeStyle()}>💰 {o.total}€</span>
             <span style={badgeStyle()}></span>
 
@@ -314,6 +317,18 @@ export default function RestaurantPage() {
             style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #ddd", fontWeight: 800, cursor: "pointer" }}
           >
             ↻ Rafraîchir
+          </button>
+
+          <button
+            onClick={async () => {
+              if (!confirm("Archiver toutes les commandes terminées et annulées ?")) return;
+              const toArchive = orders.filter(o => ["done","cancelled"].includes(String(o.status ?? "")));
+              await Promise.all(toArchive.map(o => fetch(`/api/orders/${encodeURIComponent(getOrderKey(o))}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "archived" }) })));
+              fetchOrdersOnce();
+            }}
+            style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #eee", fontWeight: 800, cursor: "pointer", color: "#888" }}
+          >
+            🗄️ Archiver
           </button>
         </div>
       </header>
