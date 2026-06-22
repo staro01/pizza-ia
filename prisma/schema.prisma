@@ -8,44 +8,79 @@ datasource db {
 }
 
 model Restaurant {
-  id          String   @id @default(cuid())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String       @id @default(cuid())
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  name              String
+  phone             String?
+  clerkUserId       String?      @unique
+  twilioNumber      String?      @unique
+  address           String?
+  estimatedPrepTime Int?         @default(20)
+  deliveryEnabled   Boolean      @default(true)
+  deliveryFee       Float?       @default(0)
+  deliveryMinimum   Float?       @default(0)
+  paymentMethods    String?      @default("CB, espèces")
+  vacationMode      Boolean      @default(false)
+  vacationMessage   String?      @default("Le restaurant est actuellement fermé. Merci de rappeler.")
+  openingHours      Json?
+  allergensInfo     String?
+  currentPromos     String?
+  welcomeMessage    String?
+  orders            Order[]
+  menuItems         MenuItem[]
+  supplements       Supplement[]
+}
 
-  name        String
-  phone       String?
-  twilioNumber String? @unique
-  clerkUserId String?  @unique
+model MenuItem {
+  id           String     @id @default(cuid())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  category     String
+  name         String
+  description  String?
+  price        Float
+  available    Boolean    @default(true)
+  sizePrices   Json?
 
-  orders      Order[]
+  @@index([restaurantId])
+}
+
+model Supplement {
+  id           String     @id @default(cuid())
+  createdAt    DateTime   @default(now())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  name         String
+  price        Float      @default(0)
+  available    Boolean    @default(true)
+
+  @@index([restaurantId])
 }
 
 model Conversation {
   id         String   @id @default(cuid())
   createdAt  DateTime @default(now())
   externalId String?  @unique
-  transcript String?
   messages   Json?
+  transcript String?
 }
 
 model Order {
-  id            String   @id @default(cuid())
-  createdAt     DateTime @default(now())
-
-  clientOrderId String?  @unique
-
-  type          String   @default("takeaway") // delivery|takeaway
-  product       String   @default("")
-  size          String   @default("")
-  extras        String   @default("")
-
-  total         Float    @default(0)
-  status        String   @default("draft") // draft|confirmed|cancelled etc.
-
-  customerName  String?
+  id            String      @id @default(cuid())
+  createdAt     DateTime    @default(now())
+  clientOrderId String?     @unique
+  extras        String      @default("")
+  product       String      @default("")
+  size          String      @default("")
+  status        String      @default("draft")
+  total         Float       @default(0)
+  type          String      @default("takeaway")
   address       String?
+  customerName  String?
   phone         String?
-
   restaurantId  String?
   restaurant    Restaurant? @relation(fields: [restaurantId], references: [id])
 

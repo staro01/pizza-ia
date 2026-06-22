@@ -9,48 +9,12 @@ export async function GET(req: NextRequest) {
 
   if (!text) return new Response("Missing text", { status: 400 });
 
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const voiceId = process.env.ELEVENLABS_VOICE_ID;
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="fr-FR" voice="Polly.Lea">${text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</Say>
+</Response>`;
 
-  if (!apiKey || !voiceId) {
-    return new Response("Missing ELEVENLABS env vars", { status: 500 });
-  }
-
-  // ✅ Twilio-friendly: μ-law 8kHz
-  const elevenUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=ulaw_8000`;
-
-  const r = await fetch(elevenUrl, {
-    method: "POST",
-    headers: {
-      "xi-api-key": apiKey,
-      "Content-Type": "application/json",
-      Accept: "audio/ulaw",
-    },
-    body: JSON.stringify({
-      text,
-      model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability: 0.4,
-        similarity_boost: 0.85,
-        style: 0.35,
-        speaker_boost: true,
-      },
-    }),
-  });
-
-  if (!r.ok) {
-    const err = await r.text().catch(() => "");
-    return new Response(`ElevenLabs error: ${r.status}\n${err}`, { status: 500 });
-  }
-
-  const audio = Buffer.from(await r.arrayBuffer());
-
-  return new Response(audio, {
-    headers: {
-      "Content-Type": "audio/ulaw",
-      "Content-Length": String(audio.length),
-      "Cache-Control": "no-store",
-      "Content-Disposition": 'inline; filename="tts.ulaw"',
-    },
+  return new Response(twiml, {
+    headers: { "Content-Type": "text/xml" },
   });
 }

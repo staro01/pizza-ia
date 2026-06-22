@@ -6,10 +6,7 @@ export const dynamic = "force-dynamic";
 function xml(body: string) {
   return new Response(body, {
     status: 200,
-    headers: {
-      "Content-Type": "application/xml; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
+    headers: { "Content-Type": "application/xml; charset=utf-8", "Cache-Control": "no-store" },
   });
 }
 
@@ -19,70 +16,59 @@ function getBaseUrl(req: Request) {
   return host ? `${proto}://${host}` : "";
 }
 
-function ttsUrl(baseUrl: string, text: string) {
-  return `${baseUrl}/api/tts/audio.ulaw?text=${encodeURIComponent(text)}`;
+function escapeXml(s: string) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-/**
- * Normalisation simple pour éviter les bugs de format.
- * Twilio envoie souvent du E.164: +339...
- */
 function normPhone(p?: string | null) {
   const raw = (p ?? "").trim().replace(/\s+/g, "");
   if (!raw) return "";
-
   if (raw.startsWith("+")) return raw;
   if (raw.startsWith("33")) return `+${raw}`;
   if (raw.startsWith("0") && raw.length === 10) return `+33${raw.slice(1)}`;
-
   return raw;
 }
 
 async function findRestaurantByTo(to: string) {
   const normalized = normPhone(to);
   const raw = (to ?? "").trim().replace(/\s+/g, "");
-
   if (normalized) {
     const direct = await prisma.restaurant.findFirst({ where: { twilioNumber: normalized } });
     if (direct) return direct;
   }
-
   if (raw) {
     const rawMatch = await prisma.restaurant.findFirst({ where: { twilioNumber: raw } });
     if (rawMatch) return rawMatch;
   }
-
   return null;
+}
+
+function buildTwimlVacation(message: string) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="fr-FR" voice="Polly.Lea">${escapeXml(message)}</Say>
+  <Hangup/>
+</Response>`;
 }
 
 function buildTwimlConfigured(req: Request, greetText: string) {
   const baseUrl = getBaseUrl(req);
-  const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech?step=listen`;
+  const actionUrl = `${baseUrl}/api/twilio/voice/handle-speech`;
   const redirectUrl = `${baseUrl}/api/twilio/voice/incoming`;
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather
-    input="speech"
-    language="fr-FR"
-    speechTimeout="auto"
-    actionOnEmptyResult="true"
-    action="${actionUrl}"
-    method="POST"
-  >
-    <Play>${ttsUrl(baseUrl, greetText)}</Play>
+  <Gather input="speech" language="fr-FR" speechTimeout="auto" actionOnEmptyResult="true" action="${actionUrl}" method="POST">
+    <Say language="fr-FR" voice="Polly.Lea">${escapeXml(greetText)}</Say>
   </Gather>
-
-  <Play>${ttsUrl(baseUrl, "Je n’ai pas entendu. On recommence.")}</Play>
+  <Say language="fr-FR" voice="Polly.Lea">Je n'ai pas entendu. On recommence.</Say>
   <Redirect method="POST">${redirectUrl}</Redirect>
 </Response>`;
 }
 
-function buildTwimlNotConfigured(req: Request) {
-  const baseUrl = getBaseUrl(req);
+function buildTwimlNotConfigured() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${ttsUrl(baseUrl, "Ce numéro n’est pas encore configuré. Merci de contacter le restaurant.")}</Play>
+  <Say language="fr-FR" voice="Polly.Lea">Ce numéro n'est pas encore configuré. Merci de contacter le restaurant.</Say>
   <Hangup/>
 </Response>`;
 }
@@ -90,22 +76,38 @@ function buildTwimlNotConfigured(req: Request) {
 export async function POST(req: Request) {
   const form = await req.formData();
   const to = (form.get("To") ?? "").toString();
+  const callSid = (form.get("CallSid") ?? "").toString();
 
   const restaurant = await findRestaurantByTo(to);
+  if (!restaurant) return xml(buildTwimlNotConfigured());
 
-  if (!restaurant) {
-    return xml(buildTwimlNotConfigured(req));
+  // Mode vacances — raccroche immédiatement avec le message configuré
+  if (restaurant.vacationMode) {
+    const msg = restaurant.vacationMessage ?? "Le restaurant est actuellement fermé. Merci de rappeler.";
+    return xml(buildTwimlVacation(msg));
   }
 
-  // ✅ Nouveau greeting demandé
-  const greet = restaurant?.name
-    ? `Bonjour, pizzeria ${restaurant.name}. Puis-je prendre votre commande ?`
-    : "Bonjour, pizzeria. Puis-je prendre votre commande ?";
+  // Message d'accueil : priorité au welcomeMessage personnalisé
+  const greet = restaurant.welcomeMessage?.trim()
+    ? restaurant.welcomeMessage.trim()
+    : restaurant.name
+      ? `Bonjour, pizzeria ${restaurant.name}, puis-je prendre votre commande ?`
+      : "Bonjour, puis-je prendre votre commande ?";
+
+  if (callSid) {
+    await prisma.conversation.upsert({
+      where: { externalId: callSid },
+      update: {},
+      create: {
+        externalId: callSid,
+        messages: [{ role: "assistant", content: greet }],
+      },
+    });
+  }
 
   return xml(buildTwimlConfigured(req, greet));
 }
 
-// GET (debug browser)
 export async function GET(req: Request) {
-  return xml(buildTwimlConfigured(req, "Bonjour, pizzeria. Puis-je prendre votre commande ?"));
+  return xml(buildTwimlConfigured(req, "Bonjour, puis-je prendre votre commande ?"));
 }
