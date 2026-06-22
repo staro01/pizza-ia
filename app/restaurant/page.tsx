@@ -13,6 +13,9 @@ type Order = {
   extras: string;
   total: number;
   status?: string;
+  customerName?: string;
+  phone?: string;
+  address?: string;
 };
 
 function formatTime(iso: string) {
