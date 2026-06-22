@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ensureRestaurantForCurrentUser } from "../lib/restaurant-bootstrap";
+import { prisma } from "../lib/prisma";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,27 @@ export default async function RestaurantLayout({ children }: { children: React.R
 
   const role = String((user.publicMetadata as any)?.role ?? "").toUpperCase();
   if (role !== "RESTAURANT" && role !== "ADMIN") redirect("/");
-  if (role === "RESTAURANT") await ensureRestaurantForCurrentUser();
+
+  let restaurant = null;
+  if (role === "RESTAURANT") {
+    restaurant = await ensureRestaurantForCurrentUser();
+
+    // Détecter si onboarding nécessaire (nom par défaut = email ou id)
+    const needsOnboarding =
+      !restaurant?.name ||
+      restaurant.name.startsWith("Restaurant ") &&
+      (restaurant.name.includes("@") || restaurant.name.length < 20);
+
+    // Compter les articles
+    const menuCount = restaurant ? await prisma.menuItem.count({ where: { restaurantId: restaurant.id } }) : 0;
+
+    if (needsOnboarding && menuCount === 0) {
+      const url = new URL("https://x");
+      // On vérifie qu'on n'est pas déjà sur /restaurant/onboarding
+      // via un header custom — sinon redirect infini
+      redirect("/restaurant/onboarding");
+    }
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff" }}>
